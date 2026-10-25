@@ -5,7 +5,7 @@
 
 [![Live demo](https://img.shields.io/badge/demo-pixel--commons.pages.dev-ff3d7f?style=for-the-badge)](https://pixel-commons.pages.dev)
 [![License: MIT](https://img.shields.io/badge/license-MIT-29adff?style=for-the-badge)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-39%20unit%20%2B%2040%20integration%20%2B%2015%20e2e-00e436?style=for-the-badge)](#testing)
+[![Tests](https://img.shields.io/badge/tests-46%20unit%20%2B%2040%20integration%20%2B%2017%20e2e-00e436?style=for-the-badge)](#testing)
 [![Runtime](https://img.shields.io/badge/runtime-Workers%20%2B%20Durable%20Objects-ffd23f?style=for-the-badge)](docs/ARCHITECTURE.md)
 
 **[Open the live canvas](https://pixel-commons.pages.dev)** | **[Static demo on GitHub Pages](https://iiiiiiiiiiiiikk.github.io/pixel-commons/)** | **[Follow the maker on X @0xkillcoin](https://x.com/0xkillcoin)**
@@ -41,9 +41,13 @@ All screenshots are captured from the deployed build by the Playwright suite - n
 | --- | --- |
 | ![Two clients](docs/screenshots/two-clients.png) | ![History dialog](docs/screenshots/history-dialog.png) |
 
-| Rules and help |
-| --- |
-| ![Help dialog](docs/screenshots/help-dialog.png) |
+| Rules and help (EN) | Rules and help (中文) |
+| --- | --- |
+| ![Help dialog](docs/screenshots/help-dialog.png) | ![帮助弹窗](docs/screenshots/help-dialog-zh.png) |
+
+| Chinese interface | Language toggle |
+| --- | --- |
+| ![中文界面](docs/screenshots/home-desktop-zh.png) | ![语言切换](docs/screenshots/lang-toggle-desktop-chromium.png) |
 
 ---
 
@@ -77,6 +81,14 @@ All screenshots are captured from the deployed build by the Playwright suite - n
   undo, reset the canvas, resolve or reject reports, rename the canvas.
 - Every admin action is written to an append-only audit trail visible in the console.
 - Admin rights live in a signed, HttpOnly cookie; the UI merely hides buttons, the server always re-checks.
+
+### Bilingual interface
+- **English and Chinese**, switchable from the header; the choice is remembered and `<html lang>` is
+  updated so screen readers, spell checkers and the browser follow the page language.
+- Every string is translated - panels, dialogs, admin console, toasts and ARIA labels - not just the
+  marketing copy.
+- Server rejections are localised from their stable reason codes, so the sentence you read always matches
+  the rule that actually fired.
 
 ### Robustness
 - Auto-reconnect with exponential backoff, heartbeat ping, and history replay from the last seen id.
@@ -116,7 +128,7 @@ npx wrangler dev
 | `npm run dev` | Vite dev server with API/WS proxy |
 | `npm run build` | Typecheck + production build into `dist/` |
 | `npm run typecheck` | `tsc` for the app and the Worker |
-| `npm test` | Unit + Durable Object authority tests (39) |
+| `npm test` | Unit + Durable Object authority + i18n dictionary tests (46) |
 | `node tests/integration.mjs` | 40-check live integration suite (HTTP + WebSocket) |
 | `npm run test:e2e` | Playwright, desktop Chromium **and** iPhone 13 WebKit |
 | `npx wrangler deploy` | Deploy the Worker + Durable Object |
@@ -250,10 +262,10 @@ Everything here was executed against the deployed origin - no mocks, no "should 
 
 | Suite | Command | Result |
 | --- | --- | --- |
-| Unit + Durable Object authority (incl. simulated restart and storage-degradation paths) | `npm test` | **39 / 39 passed** |
+| Unit + Durable Object authority + i18n dictionaries | `npm test` | **46 / 46 passed** |
 | Integration (HTTP + WebSocket, live origin) | `node tests/integration.mjs` | **40 / 40 passed** (or 34 + explicit SKIPs when storage is degraded) |
-| E2E desktop (Chromium 1440x900) | `npm run test:e2e -- --project=desktop-chromium` | **7 passed, 1 skipped** (phone-only) |
-| E2E mobile (iPhone 13, real WebKit) | `npm run test:e2e -- --project=iphone-13` | **7 passed + 1 on retry** |
+| E2E desktop (Chromium 1440x900) | `npm run test:e2e -- --project=desktop-chromium` | **8 passed, 1 skipped** (phone-only) |
+| E2E mobile (iPhone 13, real WebKit) | `npm run test:e2e -- --project=iphone-13` | **9 passed** |
 
 What the integration suite actually asserts (each line is a real check, not a smoke test):
 
@@ -338,10 +350,11 @@ pixel-commons/
 |-- src/                        # React front-end
 |   |-- App.tsx
 |   |-- components/             # PixelCanvas, Panels, AdminConsole
-|   |-- lib/                    # socket hook, typed API client
+|   |-- lib/                    # socket hook, typed API client, i18n dictionaries
 |   `-- styles.css
 |-- tests/
 |   |-- rle.test.ts             # codec unit tests
+|   |-- i18n.test.ts            # dictionary integrity (en/zh parity)
 |   |-- durable-object.test.ts  # runs the real DO class against node:sqlite
 |   |-- integration.mjs         # 40 checks against a live origin
 |   `-- e2e/app.spec.ts         # Playwright desktop + iPhone
@@ -393,6 +406,8 @@ Honest list - these are real, and the README does not pretend otherwise.
 - [x] History, snapshots, PNG export, shareable deep links
 - [x] Moderation queue, admin console, audit trail, maintenance mode
 - [x] Desktop + iPhone responsive UI, touch gestures, reconnect UX
+- [x] English / Chinese interface with a persisted switch
+- [ ] More languages (the dictionary is a plain typed object, so adding one is a single file)
 - [ ] Themed events / limited palettes per day
 - [ ] Team or faction canvases with scoped permissions
 - [ ] WebSocket hibernation to cut Durable Object duration further

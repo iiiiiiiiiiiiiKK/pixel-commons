@@ -6,10 +6,10 @@ Every number in the README comes from a command in this document. Nothing is est
 
 | Suite | Command | Result |
 | --- | --- | --- |
-| Unit + Durable Object authority | `npm test` | **39 / 39 passed** |
+| Unit + DO authority + i18n dictionaries | `npm test` | **46 / 46 passed** |
 | Integration (live origin) | `node tests/integration.mjs` | **40 / 40 passed** |
-| E2E desktop (Chromium) | `npx playwright test --project=desktop-chromium` | **7 passed, 1 skipped** |
-| E2E mobile (iPhone 13 / WebKit) | `npx playwright test --project=iphone-13` | **7 passed + 1 on retry** |
+| E2E desktop (Chromium) | `npx playwright test --project=desktop-chromium` | **8 passed, 1 skipped** |
+| E2E mobile (iPhone 13 / WebKit) | `npx playwright test --project=iphone-13` | **9 passed** |
 | Typecheck | `npm run typecheck` | clean |
 | Production build | `npm run build` | clean (`dist/` about 186 kB JS, 59 kB gzip) |
 | Dependency audit | `npm audit` | **0 vulnerabilities** |
@@ -20,7 +20,7 @@ Every number in the README comes from a command in this document. Nothing is est
 npm test
 ```
 
-Two files, 39 tests.
+Three files, 46 tests.
 
 ### `tests/rle.test.ts` (13 tests) - the codec
 
@@ -31,6 +31,12 @@ Two files, 39 tests.
 - `parseHex` / `normaliseHex` accepting 3- and 6-digit forms and rejecting everything else.
 - Palette expansion to RGB triplets; the default palette is exactly 16 valid `#rrggbb` entries.
 - Canvas id slugification.
+
+### `tests/i18n.test.ts` (7 tests) - the dictionaries
+
+A missing translation is invisible at runtime (the fallback quietly shows English), so these tests fail the
+build instead: identical key sets across languages, no empty strings, matching `{placeholders}`, a check that
+most zh strings actually differ from en, report-reason key coverage, and locale declarations.
 
 ### `tests/durable-object.test.ts` (26 tests) - the authority
 
@@ -157,6 +163,7 @@ Spec coverage:
 | Two browser contexts see the same canvas and presence of at least 2 | yes | yes |
 | Auto-reconnect after `setOffline(true)` then `false` | yes | yes |
 | Phone-only: palette/activity sheets, no horizontal overflow, all controls inside the viewport, tap places a pixel, zoom buttons work | skipped | yes |
+| Language toggle switches document language, copy and dialogs, and survives a reload | yes | yes |
 
 Screenshots are written to `docs/screenshots/` from these runs - that is why every image in the README shows
 the real deployed UI.
