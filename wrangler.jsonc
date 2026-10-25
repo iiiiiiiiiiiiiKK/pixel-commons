@@ -1,0 +1,36 @@
+﻿{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "pixel-commons",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-08-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/ws", "/healthz"]
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CANVAS",
+        "class_name": "CanvasRoom"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["CanvasRoom"]
+    }
+  ],
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "CANVAS_WIDTH": "256",
+    "CANVAS_HEIGHT": "256",
+    "CANVAS_NAME": "Pixel Commons",
+    "COOLDOWN_SECONDS": "30",
+  }
+}

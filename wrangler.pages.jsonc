@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "pixel-commons",
+  "pages_build_output_dir": "./dist",
+  "compatibility_date": "2026-08-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "services": [
+    {
+      "binding": "BACKEND",
+      "service": "pixel-commons"
+    }
+  ],
+  "vars": {
+    "CANVAS_WIDTH": "256",
+    "CANVAS_HEIGHT": "256",
+    "CANVAS_NAME": "Pixel Commons",
+    "COOLDOWN_SECONDS": "30"
+  }
+}

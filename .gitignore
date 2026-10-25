@@ -1,0 +1,47 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build output
+dist/
+dist-pages/
+.wrangler/
+worker-configuration.d.ts
+
+# local secrets & env
+.env
+.env.local
+.env.*.local
+.dev.vars
+.vars
+
+# test artefacts
+coverage/
+playwright-report/
+test-results/
+blob-report/
+.playwright/
+
+# editor / OS
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+
+# local data dumps / backups
+backups/
+*.sqlite
+*.sqlite3
+*.db
+
+# production secret escrow (local only)
+secrets.production.txt
