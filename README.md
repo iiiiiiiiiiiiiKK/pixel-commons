@@ -117,7 +117,7 @@ npx wrangler dev
 | `npm run build` | Typecheck + production build into `dist/` |
 | `npm run typecheck` | `tsc` for the app and the Worker |
 | `npm test` | Unit + Durable Object authority tests (39) |
-| `node tests/integration.mjs` | 43-check live integration suite (HTTP + WebSocket) |
+| `node tests/integration.mjs` | 40-check live integration suite (HTTP + WebSocket) |
 | `npm run test:e2e` | Playwright, desktop Chromium **and** iPhone 13 WebKit |
 | `npx wrangler deploy` | Deploy the Worker + Durable Object |
 | `node scripts/deploy.mjs --pages` | Build + deploy Worker and Pages together |
@@ -251,7 +251,7 @@ Everything here was executed against the deployed origin - no mocks, no "should 
 | Suite | Command | Result |
 | --- | --- | --- |
 | Unit + Durable Object authority (incl. simulated restart and storage-degradation paths) | `npm test` | **39 / 39 passed** |
-| Integration (HTTP + WebSocket, live origin) | `node tests/integration.mjs` | **40 / 40 passed** |
+| Integration (HTTP + WebSocket, live origin) | `node tests/integration.mjs` | **40 / 40 passed** (or 34 + explicit SKIPs when storage is degraded) |
 | E2E desktop (Chromium 1440x900) | `npm run test:e2e -- --project=desktop-chromium` | **7 passed, 1 skipped** (phone-only) |
 | E2E mobile (iPhone 13, real WebKit) | `npm run test:e2e -- --project=iphone-13` | **7 passed + 1 on retry** |
 
@@ -343,7 +343,7 @@ pixel-commons/
 |-- tests/
 |   |-- rle.test.ts             # codec unit tests
 |   |-- durable-object.test.ts  # runs the real DO class against node:sqlite
-|   |-- integration.mjs         # 43 checks against a live origin
+|   |-- integration.mjs         # 40 checks against a live origin
 |   `-- e2e/app.spec.ts         # Playwright desktop + iPhone
 |-- scripts/                    # deploy helper, canvas seeding, API publisher
 |-- docs/                       # architecture, deployment, security, governance, testing

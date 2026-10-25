@@ -64,7 +64,8 @@ ADMIN_TOKEN=<token> node tests/integration.mjs
 ```
 
 It drives the real HTTP + WebSocket surface with plain `fetch` and Node's `WebSocket` - no mocks and no
-test-only endpoints.
+test-only endpoints. 40 assertions run on a healthy deployment; when the server reports `storageHealthy: false`
+the storage-dependent ones print an explicit `SKIP` with the reason, so the pass count never overstates coverage.
 
 ### Session and identity
 - `health endpoint reports canvas geometry` - `/api/health` answers with real config.
