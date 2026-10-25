@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Anonymous session handling.
  *
  * Pixel Commons deliberately collects as little as possible: no email, no password,
@@ -8,7 +8,7 @@
  * nothing about the device or network.
  *
  * Because the cookie is HttpOnly + SameSite=Lax and the WebSocket upgrade request
- * carries it, the server 鈥?not the client 鈥?always owns the identity. A malicious
+ * carries it, the server -not the client -always owns the identity. A malicious
  * client cannot claim another user's cooldown budget by simply editing a field in
  * the WebSocket message.
  */

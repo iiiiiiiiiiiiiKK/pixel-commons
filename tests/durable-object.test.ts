@@ -89,7 +89,7 @@ describe('CanvasRoom: handshake', () => {
     recorder.reset();
     await connect(room, SID_A);
 
-    // Bounded history/presence queries only — never a full-table canvas scan.
+    // Bounded history/presence queries only - never a full-table canvas scan.
     expect(recorder.rowsRead).toBeLessThan(120);
     expect(recorder.statements.some((s) => s.includes('FROM cells'))).toBe(false);
     expect(recorder.statements.some((s) => s.includes('FROM canvas'))).toBe(false);
@@ -196,7 +196,7 @@ describe('CanvasRoom: placement authority', () => {
     b.clear();
     b.receive({ t: 'place', x: 0, y: 0, c: 0, nonce: 'n0b' });
     const reject = b.messages().find((m) => m.t === 'reject');
-    // either "unchanged" (preferred) or cooldown 鈥?never an accepted write
+    // either "unchanged" (preferred) or cooldown - never an accepted write
     expect(['unchanged', 'cooldown']).toContain(reject?.reason);
   });
 
@@ -229,7 +229,7 @@ describe('CanvasRoom: persistence', () => {
     expect(writes.some((s) => s.startsWith('INSERT INTO history'))).toBe(true);
     expect(writes.some((s) => s.startsWith('INSERT INTO players'))).toBe(true);
     expect(writes.some((s) => s.includes('INTO canvas'))).toBe(true);
-    // The board is a single blob update 鈥?no per-cell rows, no full-table scan.
+    // The board is a single blob update - no per-cell rows, no full-table scan.
     expect(writes.filter((s) => s.includes('INTO canvas')).length).toBe(1);
     expect(recorder.rowsRead).toBe(0);
   });

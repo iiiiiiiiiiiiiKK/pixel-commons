@@ -6,29 +6,52 @@ Every number in the README comes from a command in this document. Nothing is est
 
 | Suite | Command | Result |
 | --- | --- | --- |
-| Unit | `npm test` | **13 / 13 passed** |
+| Unit + Durable Object authority | `npm test` | **36 / 36 passed** |
 | Integration (live origin) | `node tests/integration.mjs` | **43 / 43 passed** |
 | E2E desktop (Chromium) | `npx playwright test --project=desktop-chromium` | **7 passed, 1 skipped** |
 | E2E mobile (iPhone 13 / WebKit) | `npx playwright test --project=iphone-13` | **8 passed** |
 | Typecheck | `npm run typecheck` | clean |
-| Production build | `npm run build` | clean (`dist/` ~186 kB JS, 59 kB gzip) |
+| Production build | `npm run build` | clean (`dist/` about 186 kB JS, 59 kB gzip) |
 | Dependency audit | `npm audit` | **0 vulnerabilities** |
 
-## 1. Unit tests
+## 1. Unit and Durable Object tests
 
 ```bash
 npm test
 ```
 
-Covers the parts where a subtle bug would be invisible until the canvas corrupts:
+Two files, 36 tests.
+
+### `tests/rle.test.ts` (13 tests) - the codec
 
 - RLE round-trips: uniform canvas, alternating noise, the 65 535 run cap, malformed blobs never exceeding the
   target length.
-- `encodeCanvas`/`decodeCanvas` index preservation.
+- `encodeCanvas` / `decodeCanvas` index preservation.
 - base64url round-trips with no `+`, `/`, `=` leakage.
 - `parseHex` / `normaliseHex` accepting 3- and 6-digit forms and rejecting everything else.
 - Palette expansion to RGB triplets; the default palette is exactly 16 valid `#rrggbb` entries.
 - Canvas id slugification.
+
+### `tests/durable-object.test.ts` (23 tests) - the authority
+
+These run the **shipped** `CanvasRoom` class through its real `fetch()` entry point against an in-memory
+SQLite database (`node:sqlite`) plus a `WebSocketPair` shim, so cooldown, validation, persistence and
+broadcast are exercised as real code paths rather than mocked helpers. Harness: `tests/helpers/do-harness.ts`.
+
+Coverage:
+
+- Session handshake: invalid session id rejected; welcome carries config, RLE canvas, palette, derived handle.
+- Cost of a connection: the board is one row; bounded history/presence queries; no `cells` table scan.
+- Placement: accepted pixel echoed to author with `nextAt`; broadcast to others without leaking the author's
+  deadline; per-session cooldown; one session does not block another; cooldown survives a reconnect.
+- Validation: negative and out-of-canvas coordinates, out-of-palette index, non-integer payload, oversized
+  frame, message flood, unchanged pixel (never spends the cooldown).
+- Persistence: exactly one `canvas` row write per pixel and zero row reads; a fresh object instance restores
+  board + history from storage (the simulated Durable Object restart).
+- Moderation: reports land in the queue, report rate limit, reset clears canvas/history but keeps the audit
+  trail, notice publish/clear, maintenance blocks writes, undo reverts to the previous colour, and "nothing to
+  undo" reports failure instead of pretending success.
+- Export: PNG magic bytes and IHDR width for 1x and 4x.
 
 ## 2. Integration suite
 
@@ -40,25 +63,25 @@ node tests/integration.mjs
 ADMIN_TOKEN=<token> node tests/integration.mjs
 ```
 
-It drives the real HTTP + WebSocket surface with plain `fetch` and Node's `WebSocket` — no mocks and no
-test-only endpoints. Each assertion is listed here with what it proves:
+It drives the real HTTP + WebSocket surface with plain `fetch` and Node's `WebSocket` - no mocks and no
+test-only endpoints.
 
-### Session & identity
-- `health endpoint reports canvas geometry` — `/api/health` answers with real config.
-- `session issues an HttpOnly cookie` — `Set-Cookie` carries a signed `pc_sid`.
-- `session cookie is HttpOnly + SameSite` — flags verified from the raw header.
-- `session exposes a stable display handle` — pattern `^[a-z]+-[a-z]+-\d{3}$`.
+### Session and identity
+- `health endpoint reports canvas geometry` - `/api/health` answers with real config.
+- `session issues an HttpOnly cookie` - `Set-Cookie` carries a signed `pc_sid`.
+- `session cookie is HttpOnly + SameSite` - flags verified from the raw header.
+- `session exposes a stable display handle` - pattern `^[a-z]+-[a-z]+-\d{3}$`.
 
 ### Realtime
-- `websocket handshake returns welcome` — a real 101 upgrade through Pages → Worker → Durable Object.
-- `welcome carries an RLE canvas blob` — the board arrives compressed, not as 65 536 bytes.
+- `websocket handshake returns welcome` - a real 101 upgrade through Pages -> Worker -> Durable Object.
+- `welcome carries an RLE canvas blob` - the board arrives compressed, not as 65 536 bytes.
 - `welcome carries the palette`.
-- `server echoes the accepted pixel to its author` — client never self-confirms.
-- `author receives the authoritative cooldown deadline` — `nextAt` is in the future, from the server clock.
-- `pixel is broadcast to other online users` — second socket receives the same delta.
-- `second immediate write is rejected by the server` — `reason: cooldown`.
-- `cooldown is per-session, not global` — a different session can write immediately.
-- `simultaneous writers settle on one authoritative value` — race resolves to one colour, no corruption.
+- `server echoes the accepted pixel to its author` - the client never self-confirms.
+- `author receives the authoritative cooldown deadline` - `nextAt` is in the future, from the server clock.
+- `pixel is broadcast to other online users` - a second socket receives the same delta.
+- `second immediate write is rejected by the server` - `reason: cooldown`.
+- `cooldown is per-session, not global` - a different session can write immediately.
+- `simultaneous writers settle on one authoritative value` - the race resolves to one colour, no corruption.
 - `presence reports the number of live connections`.
 
 ### Validation
@@ -67,20 +90,20 @@ test-only endpoints. Each assertion is listed here with what it proves:
 - `out-of-palette colour indices are rejected` (`bad_color`).
 - `malformed placement payloads are rejected` (`bad_request`).
 - `unknown message types are rejected` (`bad_request`).
-- `per-connection message flood is rate limited` — a 15 ms ping loop trips `rate_limited`.
+- `per-connection message flood is rate limited` - a 15 ms ping loop trips `rate_limited`.
 
-### Persistence & history
+### Persistence and history
 - `accepted pixels are persisted and readable over HTTP`.
 - `history records the author handle for each pixel`.
-- `reconnect replays history after the cursor` — `?since=<id>` returns only newer rows.
-- `reconnect restores the same identity` — handle is stable across sockets.
+- `reconnect replays history after the cursor` - `?since=<id>` returns only newer rows.
+- `reconnect restores the same identity` - the handle is stable across sockets.
 - `snapshot index is queryable`.
 
 ### Export
-- `PNG export returns a valid PNG file` — magic bytes `89 50 4e 47`, `content-type: image/png`.
-- `PNG dimensions match the canvas` — IHDR width parsed out of the file.
+- `PNG export returns a valid PNG file` - magic bytes `89 50 4e 47`, `content-type: image/png`.
+- `PNG dimensions match the canvas` - IHDR width parsed out of the file.
 
-### Moderation & admin
+### Moderation and admin
 - `reports are accepted into the moderation queue`.
 - `admin view rejects anonymous callers` (401).
 - `admin login rejects a wrong token` (401).
@@ -88,10 +111,10 @@ test-only endpoints. Each assertion is listed here with what it proves:
 - `admin view returns reports + audit trail`.
 - `admin can publish a notice` / `admin can clear a notice`.
 - `admin can undo the last pixel`.
-- `admin actions are written to the audit trail` — row count grows.
+- `admin actions are written to the audit trail` - row count grows.
 - `anonymous callers cannot reset the canvas`.
 
-### Transport & scale
+### Transport and scale
 - `websocket without a session cookie is refused`.
 - `static front-end is served at /`.
 - `12 concurrent websocket clients connect`.
@@ -100,13 +123,13 @@ test-only endpoints. Each assertion is listed here with what it proves:
 ### Measured result (2026-10-25, production)
 
 ```
-12 concurrent sockets   →  ~1.1 s per handshake
-fan-out to 12 sockets   →  6/6 delivered, avg 250 ms
+12 concurrent sockets   ->  about 1.1 s per handshake
+fan-out to 12 sockets   ->  6/6 delivered, avg 250 ms
 ```
 
-Interpretation: the numbers describe a single-region Durable Object under a light load test from one client
-machine, not a capacity guarantee. Fan-out is one outbound frame per subscriber, so latency is dominated by the
-distance from the tester to the object's region.
+Interpretation: these numbers describe a single-region Durable Object under a light load test from one client
+machine, not a capacity guarantee. Fan-out is one outbound frame per subscriber, so latency is dominated by
+the distance from the tester to the object's region.
 
 ## 3. End-to-end tests (Playwright)
 
@@ -117,45 +140,51 @@ PIXEL_COMMONS_URL=https://pixel-commons.pages.dev npx playwright test
 
 Two projects run the same spec file:
 
-- **desktop-chromium** — 1440×900, mouse input, wheel zoom, sidebar panels.
-- **iphone-13** — real WebKit with a 390×844 viewport, `hasTouch`, device pixel ratio 3.
+- **desktop-chromium** - 1440x900, mouse input, wheel zoom, sidebar panels.
+- **iphone-13** - real WebKit with a 390x844 viewport, `hasTouch`, device pixel ratio 3.
 
 Spec coverage:
 
 | Test | Desktop | iPhone |
 | --- | --- | --- |
-| Loads canvas, palette, X link, no console errors, canvas ≥ 25 % of viewport | ✅ | ✅ (palette via sheet) |
-| Places a pixel at a deep-linked coordinate, verifies persisted colour | ✅ | ✅ (real tap) |
-| Cooldown CTA shows a server-derived `Ready`/countdown | ✅ | ✅ |
-| History dialog exposes working `/api/export.png` links, fetches a valid PNG | ✅ | ✅ |
-| Help dialog documents rules and controls | ✅ | ✅ |
-| Two browser contexts see the same canvas and presence ≥ 2 | ✅ | ✅ |
-| Auto-reconnect after `setOffline(true)` → `false` | ✅ | ✅ |
-| Phone-only: palette/activity sheets, no horizontal overflow, all controls inside the viewport, tap places a pixel, zoom buttons work | skipped | ✅ |
+| Loads canvas, palette, X link, no console errors, canvas covers 25 %+ of viewport | yes | yes (palette via sheet) |
+| Places a pixel at a deep-linked coordinate, verifies persisted colour | yes | yes (real tap) |
+| Cooldown CTA shows a server-derived Ready/countdown | yes | yes |
+| History dialog exposes working `/api/export.png` links, fetches a valid PNG | yes | yes |
+| Help dialog documents rules and controls | yes | yes |
+| Two browser contexts see the same canvas and presence of at least 2 | yes | yes |
+| Auto-reconnect after `setOffline(true)` then `false` | yes | yes |
+| Phone-only: palette/activity sheets, no horizontal overflow, all controls inside the viewport, tap places a pixel, zoom buttons work | skipped | yes |
 
-Screenshots are written to `docs/screenshots/` from these runs — that is why every image in the README shows
+Screenshots are written to `docs/screenshots/` from these runs - that is why every image in the README shows
 the real deployed UI.
 
 ### Bugs these tests actually caught (and were fixed)
 
-1. **`Expected exactly one result from SQL query, but got no results`** — `.one()` throws on an empty result in
-   workerd. Every read was switched to `toArray()[0] ?? null`. This is why WebSocket upgrades returned 500.
-2. **Reconnect never restored `live`** — `setOffline(false)` fires `online` before the old socket's `close`, so
-   `connect()` short-circuited on a dead socket. Reconnects now force a fresh socket.
-3. **Overlay controls swallowed taps on mobile** — the canvas pointer-capture handler treated the palette tab as
-   a canvas press. Pointer handling now ignores events whose target is not the canvas surface.
+1. **`Expected exactly one result from SQL query, but got no results`** - `.one()` throws on an empty result in
+   workerd. Every read was switched to `toArray()[0] ?? null`. This is why WebSocket upgrades returned 500 in
+   production while the type checker was perfectly happy.
+2. **Reconnect never restored `live`** - `setOffline(false)` fires `online` before the old socket's `close`, so
+   `connect()` short-circuited on a dead socket. Reconnects now force a fresh socket and only clear the ref if
+   it still points at the socket that closed.
+3. **Overlay controls swallowed taps on mobile** - the canvas pointer-capture handler treated a palette tab
+   press as a canvas press. Pointer handling now ignores events whose target is not the canvas surface.
+4. **Durable Object free-tier row reads** - the original per-cell table made every `welcome` a full-table
+   scan. Replaced with a single packed RLE board row held in memory and storage, so a pixel write performs
+   zero row reads and one row write. Reported honestly in the README because the quota wall is a real
+   production constraint, not a test artefact.
 
 ## 4. What is *not* covered
 
-Stated plainly so nobody over-trusts the suite:
+Stated plainly so nobody over-trusts the suite.
 
 - **Local `wrangler dev` could not be exercised on this Windows host.** `workerd` crashes at startup with a
-  stack overflow (`thread 'main' has overflowed its stack`) — reproducible with a minimal capnp config and with
-  older `workerd` builds, so it is an environment/host issue, not project code. All verification was therefore
-  run against the deployed Cloudflare origin, which is the more meaningful target anyway.
-- **True server restart / Durable Object eviction** was not forced. Persistence is proven indirectly: history,
-  snapshots and cooldown state survive across many independent sockets and minutes of idle time, and the DO
-  reloads its tables through `load()` on every cold start.
+  stack overflow (`thread 'main' has overflowed its stack`) - reproducible with a minimal capnp config and
+  with older workerd builds, so it is an environment/host issue, not project code. Verification therefore ran
+  against the deployed Cloudflare origin, which is the more meaningful target anyway.
+- **True server restart / Durable Object eviction** was not forced on the deployed instance. It *is* covered
+  deterministically in `tests/durable-object.test.ts`, which builds a second `CanvasRoom` over the same
+  database and asserts the board and history reload.
 - **Load testing stops at 12 concurrent sockets from one machine.** No claim about thousands of concurrent
   users is made anywhere.
 - **Safari third-party cookie blocking** (relevant only to the GitHub Pages cross-site build) was not verified

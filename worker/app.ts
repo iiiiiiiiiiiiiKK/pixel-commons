@@ -1,4 +1,4 @@
-﻿import type { Env } from './env';
+import type { Env } from './env';
 import { adminCookie, clearAdminCookie, handleFor, resolveSession, safeEqual, sessionCookie, signAdmin, signedSessionValue } from './session';
 import { readConfig } from './durable-object';
 
@@ -9,9 +9,9 @@ import { readConfig } from './durable-object';
 /**
  * The same routing core serves two deployments:
  *
- *  1. `worker/index.ts` 鈥?the Worker that owns the Durable Object and (optionally)
+ *  1. `worker/index.ts` - the Worker that owns the Durable Object and (optionally)
  *     the static assets. This is the canonical Cloudflare Workers deployment.
- *  2. `functions/` on Cloudflare Pages 鈥?a thin proxy that uses a service binding
+ *  2. `functions/` on Cloudflare Pages - a thin proxy that uses a service binding
  *     to reach the same Durable Object. Pages is used as the public origin when
  *     workers.dev is not a good fit (custom domains, corporate networks, DNS).
  */
@@ -121,7 +121,7 @@ function throttleLogin(key: string): boolean {
 }
 
 /**
- * True when the browser is calling this API from a different origin 鈥?for example
+ * True when the browser is calling this API from a different origin - for example
  * the static GitHub Pages build talking to the Worker. Such requests need
  * `SameSite=None` cookies to survive, which is why the flag is derived from the
  * Origin header instead of being hard-coded.

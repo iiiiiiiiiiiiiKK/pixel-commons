@@ -508,7 +508,7 @@ export class CanvasRoom implements DurableObject {
       this.send(conn, {
         t: 'reject',
         reason: 'rate_limited',
-        message: 'Too many actions 闁?take a breath.',
+        message: 'Too many actions - take a breath.',
         retryAfterMs: BURST_WINDOW_MS - (now - conn.windowStart),
       });
       return;
@@ -632,7 +632,7 @@ export class CanvasRoom implements DurableObject {
   /**
    * Serialise the in-memory board to RLE.
    *
-   * No SQL involved 鈥?the earlier implementation scanned a `cells` table on every
+   * No SQL involved - the earlier implementation scanned a `cells` table on every
    * call, which turned each WebSocket `welcome` into an O(canvas) row-read burst.
    */
   private exportRle(): Uint8Array {
@@ -719,7 +719,7 @@ export class CanvasRoom implements DurableObject {
     this.send(conn, {
       t: 'notice',
       notice: {
-        message: `Report received for (${x}, ${y}). Thank you 闁?moderators review the queue.`,
+        message: `Report received for (${x}, ${y}). Thank you - moderators review the queue.`,
         level: 'info',
         since: now,
         updatedBy: 'system',
