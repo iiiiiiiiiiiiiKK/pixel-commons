@@ -328,7 +328,7 @@ export function ActivityFeed({
       </div>
 
       {history.length === 0 ? (
-        <p className="empty">No pixels yet. Place the very first one — it will be in the history forever.</p>
+        <p className="empty">No pixels yet. Place the very first one - it will be in the history forever.</p>
       ) : (
         <ul className="activity-list" data-testid="activity-list">
           {history.slice(0, 14).map((entry) => (

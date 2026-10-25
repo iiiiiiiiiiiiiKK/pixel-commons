@@ -6,7 +6,7 @@ Every number in the README comes from a command in this document. Nothing is est
 
 | Suite | Command | Result |
 | --- | --- | --- |
-| Unit + Durable Object authority | `npm test` | **36 / 36 passed** |
+| Unit + Durable Object authority | `npm test` | **38 / 38 passed** |
 | Integration (live origin) | `node tests/integration.mjs` | **43 / 43 passed** |
 | E2E desktop (Chromium) | `npx playwright test --project=desktop-chromium` | **7 passed, 1 skipped** |
 | E2E mobile (iPhone 13 / WebKit) | `npx playwright test --project=iphone-13` | **8 passed** |
@@ -20,7 +20,7 @@ Every number in the README comes from a command in this document. Nothing is est
 npm test
 ```
 
-Two files, 36 tests.
+Two files, 38 tests.
 
 ### `tests/rle.test.ts` (13 tests) - the codec
 
@@ -32,7 +32,7 @@ Two files, 36 tests.
 - Palette expansion to RGB triplets; the default palette is exactly 16 valid `#rrggbb` entries.
 - Canvas id slugification.
 
-### `tests/durable-object.test.ts` (23 tests) - the authority
+### `tests/durable-object.test.ts` (25 tests) - the authority
 
 These run the **shipped** `CanvasRoom` class through its real `fetch()` entry point against an in-memory
 SQLite database (`node:sqlite`) plus a `WebSocketPair` shim, so cooldown, validation, persistence and

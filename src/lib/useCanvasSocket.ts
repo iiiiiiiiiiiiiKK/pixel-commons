@@ -151,8 +151,23 @@ export function useCanvasSocket(options: UseCanvasOptions): CanvasSocket {
           setHistory((prev) => [...entries.reverse(), ...prev].slice(0, 80));
         }
         setConfig((prev) =>
-          prev ? { ...prev, totalPixels: message.totalPixels, version: message.version } : prev,
+          prev
+            ? {
+                ...prev,
+                totalPixels: message.totalPixels,
+                version: message.version,
+                ...(message.storageHealthy === false ? { storageHealthy: false } : {}),
+              }
+            : prev,
         );
+        if (message.storageHealthy === false) {
+          setRejection({
+            reason: 'server_error',
+            message:
+              'Your pixel is visible to everyone, but the server could not save it yet (storage limit). It may be lost on restart.',
+            at: Date.now(),
+          });
+        }
         setLastSyncAt(Date.now());
         pendingPlace.current = null;
         break;

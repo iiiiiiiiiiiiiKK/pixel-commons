@@ -5,7 +5,7 @@
 
 [![Live demo](https://img.shields.io/badge/demo-pixel--commons.pages.dev-ff3d7f?style=for-the-badge)](https://pixel-commons.pages.dev)
 [![License: MIT](https://img.shields.io/badge/license-MIT-29adff?style=for-the-badge)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-36%20unit%20%2B%2043%20integration%20%2B%2015%20e2e-00e436?style=for-the-badge)](#testing)
+[![Tests](https://img.shields.io/badge/tests-38%20unit%20%2B%2043%20integration%20%2B%2015%20e2e-00e436?style=for-the-badge)](#testing)
 [![Runtime](https://img.shields.io/badge/runtime-Workers%20%2B%20Durable%20Objects-ffd23f?style=for-the-badge)](docs/ARCHITECTURE.md)
 
 **[Open the live canvas](https://pixel-commons.pages.dev)** | **[Follow the maker on X @0xkillcoin](https://x.com/0xkillcoin)**
@@ -116,7 +116,7 @@ npx wrangler dev
 | `npm run dev` | Vite dev server with API/WS proxy |
 | `npm run build` | Typecheck + production build into `dist/` |
 | `npm run typecheck` | `tsc` for the app and the Worker |
-| `npm test` | Unit + Durable Object authority tests (36) |
+| `npm test` | Unit + Durable Object authority tests (38) |
 | `node tests/integration.mjs` | 43-check live integration suite (HTTP + WebSocket) |
 | `npm run test:e2e` | Playwright, desktop Chromium **and** iPhone 13 WebKit |
 | `npx wrangler deploy` | Deploy the Worker + Durable Object |
@@ -242,7 +242,7 @@ Everything here was executed against the deployed origin - no mocks, no "should 
 
 | Suite | Command | Result |
 | --- | --- | --- |
-| Unit + Durable Object authority (incl. simulated DO restart) | `npm test` | **36 / 36 passed** |
+| Unit + Durable Object authority (incl. simulated restart and storage-degradation paths) | `npm test` | **38 / 38 passed** |
 | Integration (HTTP + WebSocket, live origin) | `node tests/integration.mjs` | **43 / 43 passed** |
 | E2E desktop (Chromium 1440x900) | `npm run test:e2e -- --project=desktop-chromium` | **7 passed, 1 skipped** (phone-only) |
 | E2E mobile (iPhone 13, real WebKit) | `npm run test:e2e -- --project=iphone-13` | **8 passed** |

@@ -142,6 +142,10 @@ export class CanvasRoom implements DurableObject {
   private board: Uint8Array;
   /** Counter used to run history trimming periodically instead of per write. */
   private writesSinceTrim = 0;
+  /** False while Durable Object storage is refusing writes (quota / overload). */
+  private storageHealthy = true;
+  /** In-memory report timestamps per handle (see handleReport for why). */
+  private readonly reportCounts = new Map<string, number[]>();
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state;
@@ -185,6 +189,20 @@ export class CanvasRoom implements DurableObject {
 
   private async load(): Promise<void> {
     if (this.loaded) return;
+    this.loaded = true;
+    try {
+      await this.loadStorage();
+    } catch (error) {
+      // Storage may be temporarily unavailable (free-tier row quota, overloaded
+      // shard). The room still has to work: start from an empty in-memory board,
+      // keep serving WebSockets, and retry persistence on the next write.
+      this.storageHealthy = false;
+      console.warn('storage_unavailable', error instanceof Error ? error.message : error);
+      this.board = new Uint8Array(this.totalCells);
+    }
+  }
+
+  private async loadStorage(): Promise<void> {
     const sql = this.state.storage.sql;
     // `board` holds the packed canvas (RLE) as a single value. One row, one read.
     sql.exec(`CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
@@ -267,7 +285,7 @@ export class CanvasRoom implements DurableObject {
       .toArray()[0] ?? null;
     this.openReports = Number(openRow?.n ?? 0);
 
-    this.loaded = true;
+    this.storageHealthy = true;
   }
 
   /* ---------------------------------------------------------------------- */
@@ -348,6 +366,7 @@ export class CanvasRoom implements DurableObject {
       canvasId: `${this.config.width}x${this.config.height}`,
       canvasName: this.canvasName,
       notice: this.notice,
+      storageHealthy: this.storageHealthy,
     };
   }
 
@@ -572,39 +591,48 @@ export class CanvasRoom implements DurableObject {
       return;
     }
 
-    const sql = this.state.storage.sql;
-    const row = sql
-      .exec<{ id: number }>(
-        `INSERT INTO history (x, y, c, prev, at, by) VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
-        x,
-        y,
-        c,
-        prev,
-        now,
+    // Storage writes are best-effort: the in-memory board stays authoritative for
+    // this instance, and a failure here must not stop the pixel from reaching other
+    // viewers. When storage is unavailable the client is told (storageHealthy=false)
+    // instead of being shown a fake "saved" confirmation.
+    let historyId = 0;
+    try {
+      const sql = this.state.storage.sql;
+      const row = sql
+        .exec<{ id: number }>(
+          `INSERT INTO history (x, y, c, prev, at, by) VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
+          x,
+          y,
+          c,
+          prev,
+          now,
+          conn.handle,
+        )
+        .toArray()[0] ?? null;
+      historyId = Number(row?.id ?? 0);
+
+      sql.exec(
+        `INSERT INTO players (session, handle, pixels, last_at) VALUES (?, ?, 1, ?)
+         ON CONFLICT(session) DO UPDATE SET pixels = pixels + 1, last_at = excluded.last_at, handle = excluded.handle`,
+        conn.sessionId,
         conn.handle,
-      )
-      .toArray()[0] ?? null;
-    const historyId = Number(row?.id ?? 0);
+        now,
+      );
+
+      this.persistBoard();
+      this.storageHealthy = true;
+    } catch (error) {
+      this.storageHealthy = false;
+      console.warn('persist_failed', error instanceof Error ? error.message : error);
+    }
 
     this.board[idx] = c;
     this.totalPixels += 1;
     this.roomVersion += 1;
 
-    sql.exec(
-      `INSERT INTO players (session, handle, pixels, last_at) VALUES (?, ?, 1, ?)
-       ON CONFLICT(session) DO UPDATE SET pixels = pixels + 1, last_at = excluded.last_at, handle = excluded.handle`,
-      conn.sessionId,
-      conn.handle,
-      now,
-    );
-
     conn.pixels += 1;
     conn.nextAt = now + this.config.cooldownMs;
     this.cooldownMap.set(conn.sessionId, conn.nextAt);
-
-    // Persist the board immediately: a hijacked or evicted isolate must never lose
-    // an accepted pixel. `persistBoard` is one row write.
-    this.persistBoard();
 
     // Broadcast the accepted pixel to everyone (including the author, so the client
     // never has to guess what the server accepted).
@@ -617,7 +645,12 @@ export class CanvasRoom implements DurableObject {
     };
     for (const other of this.connections.values()) {
       if (other.id === conn.id) {
-        this.send(other, { ...delta, nextAt: conn.nextAt, self: conn.handle } as ServerMessage);
+        this.send(other, {
+          ...delta,
+          nextAt: conn.nextAt,
+          self: conn.handle,
+          ...(this.storageHealthy ? {} : { storageHealthy: false }),
+        } as ServerMessage);
       } else {
         this.send(other, delta);
       }
@@ -652,9 +685,11 @@ export class CanvasRoom implements DurableObject {
   private cooldownDeadline(sessionId: string): number {
     const cached = this.cooldownMap.get(sessionId);
     if (cached !== undefined) return cached;
-    const row = this.state.storage.sql
-      .exec<{ last_at: number }>(`SELECT last_at FROM players WHERE session = ?`, sessionId)
-      .toArray()[0] ?? null;
+    const row = this.safeRead('cooldownDeadline', () =>
+      this.state.storage.sql
+        .exec<{ last_at: number }>(`SELECT last_at FROM players WHERE session = ?`, sessionId)
+        .toArray(),
+    )[0] ?? null;
     const last = Number(row?.last_at ?? 0);
     const deadline = last ? last + this.config.cooldownMs : 0;
     this.cooldownMap.set(sessionId, deadline);
@@ -662,9 +697,9 @@ export class CanvasRoom implements DurableObject {
   }
 
   private playerPixels(sessionId: string): number {
-    const row = this.state.storage.sql
-      .exec<{ pixels: number }>(`SELECT pixels FROM players WHERE session = ?`, sessionId)
-      .toArray()[0] ?? null;
+    const row = this.safeRead('playerPixels', () =>
+      this.state.storage.sql.exec<{ pixels: number }>(`SELECT pixels FROM players WHERE session = ?`, sessionId).toArray(),
+    )[0] ?? null;
     return Number(row?.pixels ?? 0);
   }
 
@@ -689,33 +724,50 @@ export class CanvasRoom implements DurableObject {
     }
     const note = String(msg.note ?? '').slice(0, 280);
     const now = nowMs();
-    const recent = this.state.storage.sql
-      .exec<{ n: number }>(
-        `SELECT COUNT(*) AS n FROM reports WHERE by = ? AND at > ?`,
-        conn.handle,
-        now - 60 * 60_000,
-      )
-      .toArray()[0] ?? null;
-    if (Number(recent?.n ?? 0) >= 10) {
+
+    // Report throttling is tracked in memory on purpose: a `COUNT(*)` per report would
+    // be a row read on every submission, which is the expensive dimension on the free
+    // tier. The counters are per-object and reset with the instance, which is fine for
+    // an abuse limiter.
+    const windowStart = now - 60 * 60_000;
+    const recent = (this.reportCounts.get(conn.handle) ?? []).filter((at) => at > windowStart);
+    if (recent.length >= 10) {
+      this.reportCounts.set(conn.handle, recent);
       this.send(conn, { t: 'reject', reason: 'rate_limited', message: 'Report limit reached for this hour.' });
       return;
     }
-    const total = this.state.storage.sql.exec<{ n: number }>(`SELECT COUNT(*) AS n FROM reports`).toArray()[0] ?? null;
-    if (Number(total?.n ?? 0) >= MAX_REPORTS) {
+    if (this.openReports >= MAX_REPORTS) {
       this.send(conn, { t: 'reject', reason: 'rate_limited', message: 'The report queue is full. Try again later.' });
       return;
     }
 
-    this.state.storage.sql.exec(
-      `INSERT INTO reports (x, y, reason, note, at, status, by) VALUES (?, ?, ?, ?, ?, 'open', ?)`,
-      x,
-      y,
-      reason,
-      note,
-      now,
-      conn.handle,
-    );
+    // Persisting the queue still needs storage; if it is unavailable the user must be
+    // told rather than left waiting for an acknowledgement that will never arrive.
+    try {
+      this.state.storage.sql.exec(
+        `INSERT INTO reports (x, y, reason, note, at, status, by) VALUES (?, ?, ?, ?, ?, 'open', ?)`,
+        x,
+        y,
+        reason,
+        note,
+        now,
+        conn.handle,
+      );
+    } catch (error) {
+      this.storageHealthy = false;
+      console.warn('report_failed', error instanceof Error ? error.message : error);
+      this.send(conn, {
+        t: 'reject',
+        reason: 'server_error',
+        message: 'The moderation queue is temporarily unavailable, so this report was not saved. Please try again later.',
+      });
+      return;
+    }
+
+    recent.push(now);
+    this.reportCounts.set(conn.handle, recent);
     this.openReports += 1;
+
     this.send(conn, {
       t: 'notice',
       notice: {
@@ -958,39 +1010,63 @@ export class CanvasRoom implements DurableObject {
     else sql.exec(`DELETE FROM meta WHERE key = 'notice'`);
   }
 
+  /**
+   * Read helpers degrade instead of throwing.
+   *
+   * Durable Object storage can become temporarily unavailable for reasons outside the
+   * app's control (free-tier row quotas, an overloaded shard). The canvas itself lives
+   * in memory, so a failed *read* must not take the whole room down: the board still
+   * loads and people can still paint. History/presence simply render empty, and the
+   * reason is logged so operators can see it.
+   */
+  private safeRead<T>(label: string, fn: () => T[], fallback: T[] = []): T[] {
+    try {
+      return fn();
+    } catch (error) {
+      console.warn('degraded_read', label, error instanceof Error ? error.message : error);
+      return fallback;
+    }
+  }
+
   private lastHistoryId(): number {
-    const row = this.state.storage.sql.exec<{ id: number }>(`SELECT id FROM history ORDER BY id DESC LIMIT 1`).toArray()[0] ?? null;
-    return Number(row?.id ?? 0);
+    return this.safeRead('lastHistoryId', () => {
+      const row = this.state.storage.sql.exec<{ id: number }>(`SELECT id FROM history ORDER BY id DESC LIMIT 1`).toArray()[0] ?? null;
+      return [Number(row?.id ?? 0)];
+    }, [0])[0]!;
   }
 
   private history(since: number, limit: number): HistoryEntry[] {
-    const rows = since
-      ? this.state.storage.sql
-          .exec<HistoryEntry>(
-            `SELECT id, x, y, c, prev, at, by FROM history WHERE id > ? ORDER BY id ASC LIMIT ?`,
-            since,
-            limit,
-          )
-          .toArray()
-      : this.state.storage.sql
-          .exec<HistoryEntry>(`SELECT id, x, y, c, prev, at, by FROM history ORDER BY id DESC LIMIT ?`, limit)
-          .toArray();
-    return rows.map((r) => ({
-      id: Number(r.id),
-      x: Number(r.x),
-      y: Number(r.y),
-      c: Number(r.c),
-      prev: r.prev === null || r.prev === undefined ? null : Number(r.prev),
-      at: Number(r.at),
-      by: String(r.by),
-    }));
+    return this.safeRead('history', () => {
+      const rows = since
+        ? this.state.storage.sql
+            .exec<HistoryEntry>(
+              `SELECT id, x, y, c, prev, at, by FROM history WHERE id > ? ORDER BY id ASC LIMIT ?`,
+              since,
+              limit,
+            )
+            .toArray()
+        : this.state.storage.sql
+            .exec<HistoryEntry>(`SELECT id, x, y, c, prev, at, by FROM history ORDER BY id DESC LIMIT ?`, limit)
+            .toArray();
+      return rows.map((r) => ({
+        id: Number(r.id),
+        x: Number(r.x),
+        y: Number(r.y),
+        c: Number(r.c),
+        prev: r.prev === null || r.prev === undefined ? null : Number(r.prev),
+        at: Number(r.at),
+        by: String(r.by),
+      }));
+    });
   }
 
   private recentMoves(limit: number): MoveEntry[] {
-    return this.state.storage.sql
-      .exec<MoveEntry>(`SELECT id, x, y, c, at FROM history ORDER BY id DESC LIMIT ?`, limit)
-      .toArray()
-      .map((r) => ({ id: Number(r.id), x: Number(r.x), y: Number(r.y), c: Number(r.c), at: Number(r.at) }));
+    return this.safeRead('recentMoves', () =>
+      this.state.storage.sql
+        .exec<MoveEntry>(`SELECT id, x, y, c, at FROM history ORDER BY id DESC LIMIT ?`, limit)
+        .toArray()
+        .map((r) => ({ id: Number(r.id), x: Number(r.x), y: Number(r.y), c: Number(r.c), at: Number(r.at) })),
+    );
   }
 
   private broadcast(message: ServerMessage): void {
@@ -1009,12 +1085,14 @@ export class CanvasRoom implements DurableObject {
   }
 
   private broadcastPresence(): void {
-    const players: Player[] = this.state.storage.sql
-      .exec<{ handle: string; pixels: number; last_at: number }>(
-        `SELECT handle, pixels, last_at FROM players ORDER BY pixels DESC, last_at DESC LIMIT 12`,
-      )
-      .toArray()
-      .map((p) => ({ handle: String(p.handle), pixels: Number(p.pixels), lastAt: Number(p.last_at) }));
+    const players: Player[] = this.safeRead('broadcastPresence', () =>
+      this.state.storage.sql
+        .exec<{ handle: string; pixels: number; last_at: number }>(
+          `SELECT handle, pixels, last_at FROM players ORDER BY pixels DESC, last_at DESC LIMIT 12`,
+        )
+        .toArray()
+        .map((p) => ({ handle: String(p.handle), pixels: Number(p.pixels), lastAt: Number(p.last_at) })),
+    );
     this.broadcast({ t: 'presence', online: this.connections.size, players });
   }
 
@@ -1023,19 +1101,24 @@ export class CanvasRoom implements DurableObject {
     const due = now - this.lastSnapshotAt >= SNAPSHOT_MIN_INTERVAL_MS || this.lastSnapshotAt === 0;
     if (!due) return;
     this.lastSnapshotAt = now;
-    const sql = this.state.storage.sql;
-    sql.exec(
-      `INSERT INTO snapshots (at, version, rle, total_pixels) VALUES (?, ?, ?, ?)`,
-      now,
-      this.roomVersion,
-      this.exportRle(),
-      this.totalPixels,
-    );
-    sql.exec(
-      `DELETE FROM snapshots WHERE id NOT IN (SELECT id FROM snapshots ORDER BY id DESC LIMIT ?)`,
-      SNAPSHOT_MAX,
-    );
-    this.persistMeta();
+    try {
+      const sql = this.state.storage.sql;
+      sql.exec(
+        `INSERT INTO snapshots (at, version, rle, total_pixels) VALUES (?, ?, ?, ?)`,
+        now,
+        this.roomVersion,
+        this.exportRle(),
+        this.totalPixels,
+      );
+      sql.exec(
+        `DELETE FROM snapshots WHERE id NOT IN (SELECT id FROM snapshots ORDER BY id DESC LIMIT ?)`,
+        SNAPSHOT_MAX,
+      );
+      this.persistMeta();
+    } catch (error) {
+      this.storageHealthy = false;
+      console.warn('snapshot_failed', error instanceof Error ? error.message : error);
+    }
   }
 
   /**
@@ -1049,11 +1132,16 @@ export class CanvasRoom implements DurableObject {
     this.writesSinceTrim += 1;
     if (this.writesSinceTrim < HISTORY_TRIM_EVERY) return;
     this.writesSinceTrim = 0;
-    const sql = this.state.storage.sql;
-    const count = Number(sql.exec<{ n: number }>(`SELECT COUNT(*) AS n FROM history`).toArray()[0]?.n ?? 0);
-    if (count <= HISTORY_LIMIT) return;
-    const excess = count - HISTORY_LIMIT;
-    sql.exec(`DELETE FROM history WHERE id IN (SELECT id FROM history ORDER BY id ASC LIMIT ?)`, excess);
+    try {
+      const sql = this.state.storage.sql;
+      const count = Number(sql.exec<{ n: number }>(`SELECT COUNT(*) AS n FROM history`).toArray()[0]?.n ?? 0);
+      if (count <= HISTORY_LIMIT) return;
+      const excess = count - HISTORY_LIMIT;
+      sql.exec(`DELETE FROM history WHERE id IN (SELECT id FROM history ORDER BY id ASC LIMIT ?)`, excess);
+    } catch (error) {
+      this.storageHealthy = false;
+      console.warn('trim_failed', error instanceof Error ? error.message : error);
+    }
   }
 }
 

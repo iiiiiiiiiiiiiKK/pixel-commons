@@ -356,3 +356,56 @@ describe('CanvasRoom: export', () => {
     expect(width).toBe(256);
   });
 });
+
+describe('CanvasRoom: storage degradation', () => {
+  it('keeps serving sockets when storage refuses to load', async () => {
+    // A Durable Object whose storage throws on every statement: the situation the
+    // deployed instance hit when the free-tier row-read quota was exhausted.
+    const failingSql = {
+      exec() {
+        throw new Error('Exceeded allowed rows read in Durable Objects free tier.');
+      },
+    };
+    const room = new CanvasRoom(
+      {
+        storage: { sql: failingSql },
+        blockConcurrencyWhile: async (fn: () => Promise<void>) => fn(),
+      } as unknown as DurableObjectState,
+      fakeEnv(),
+    );
+
+    const a = await connect(room, SID_A);
+    const welcome = a.welcome();
+    expect(welcome).toBeTruthy();
+    // The board still arrives (empty), so the UI is usable.
+    expect(typeof welcome!.canvas).toBe('string');
+    expect(welcome!.config.storageHealthy).toBe(false);
+
+    // Painting still broadcasts; the author is told it was not persisted.
+    a.clear();
+    a.receive({ t: 'place', x: 2, y: 2, c: 7, nonce: 'n1' });
+    const echo = a.messages().find((m) => m.t === 'pixels');
+    expect(echo).toBeTruthy();
+    expect(echo!.storageHealthy).toBe(false);
+  });
+
+  it('still enforces the cooldown with storage down', async () => {
+    const failingSql = {
+      exec() {
+        throw new Error('storage offline');
+      },
+    };
+    const room = new CanvasRoom(
+      {
+        storage: { sql: failingSql },
+        blockConcurrencyWhile: async (fn: () => Promise<void>) => fn(),
+      } as unknown as DurableObjectState,
+      fakeEnv(),
+    );
+    const a = await connect(room, SID_A);
+    a.receive({ t: 'place', x: 1, y: 1, c: 4, nonce: 'n1' });
+    a.clear();
+    a.receive({ t: 'place', x: 2, y: 2, c: 4, nonce: 'n2' });
+    expect(a.messages().find((m) => m.t === 'reject')?.reason).toBe('cooldown');
+  });
+});

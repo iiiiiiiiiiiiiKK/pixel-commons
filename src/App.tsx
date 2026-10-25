@@ -265,8 +265,16 @@ export default function App() {
 
       <div className="banner-stack">
         <ConnectionBanner state={socket.state} attempts={socket.attempts} onRetry={socket.retryNow} />
-        {socket.notice && socket.notice.level !== 'info' && <NoticeBanner notice={socket.notice} />}
-        {socket.notice?.level === 'info' && <NoticeBanner notice={socket.notice} />}
+        {socket.config?.storageHealthy === false && (
+          <div className="notice warn" role="alert" data-testid="storage-banner">
+            <span className="notice-level">storage</span>
+            <span className="notice-text">
+              The canvas is running in memory only right now - pixels are visible to everyone but may not survive a
+              restart. History, snapshots and export are paused until storage recovers.
+            </span>
+          </div>
+        )}
+        {socket.notice && <NoticeBanner notice={socket.notice} />}
       </div>
 
       <main className={`app-main ${ready ? 'ready' : 'loading'}`}>

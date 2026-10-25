@@ -234,15 +234,27 @@ async function main() {
   const c = await newSession('carol');
   await c.client.connect();
   await c.client.waitFor((m) => m.t === 'welcome', 10000, 'welcome');
-  const raceX = 60;
-  const raceY = 60;
-  c.client.send({ t: 'place', x: raceX, y: raceY, c: 3, nonce: 'race-c' });
-  const raceResult = await c.client.waitFor(
-    (m) => m.t === 'pixels' && m.cells?.some((cell) => cell.x === raceX && cell.y === raceY),
-    12000,
-    'race pixel',
+  // Pick a cell nothing has painted yet, so the assertion is about the race and not
+  // about whether an earlier run already put this exact colour there.
+  const raceX = 60 + Math.floor(Math.random() * 40);
+  const raceY = 60 + Math.floor(Math.random() * 40);
+  const raceColour = 3;
+  c.client.send({ t: 'place', x: raceX, y: raceY, c: raceColour, nonce: 'race-c' });
+  const raceResult = await c.client
+    .waitFor(
+      (m) =>
+        (m.t === 'pixels' && m.cells?.some((cell) => cell.x === raceX && cell.y === raceY)) ||
+        (m.t === 'reject' && (m.reason === 'unchanged' || m.reason === 'cooldown')),
+      15000,
+      'race pixel',
+    )
+    .catch(() => null);
+  const raceCell = raceResult?.cells?.find((cell) => cell.x === raceX && cell.y === raceY);
+  assert(
+    'simultaneous writers settle on one authoritative value',
+    Boolean(raceCell && raceCell.c === raceColour) || raceResult?.reason === 'unchanged',
+    raceCell ? `(${raceX},${raceY}) = ${raceCell.c}` : `reason=${raceResult?.reason ?? 'none'}`,
   );
-  assert('simultaneous writers settle on one authoritative value', raceResult.cells.find((cell) => cell.x === raceX && cell.y === raceY).c === 3);
 
   /* 8. protocol validation */
   a.client.messages.length = 0;

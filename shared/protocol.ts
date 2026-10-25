@@ -33,6 +33,12 @@ export type ServerConfig = {
   canvasName: string;
   /** the currently published maintenance notice, or null */
   notice: Notice | null;
+  /**
+   * False when durable storage is temporarily refusing writes (free-tier quota or a
+   * platform hiccup). The canvas keeps working in memory; the UI surfaces this so a
+   * user is never told a pixel was saved for good when it may not have been.
+   */
+  storageHealthy?: boolean;
 };
 
 export type Notice = {
@@ -107,6 +113,8 @@ export type ServerMessage =
       version: number;
       /** the author's handle, only sent to the author */
       self?: string;
+      /** present and false only when the server failed to persist this write */
+      storageHealthy?: boolean;
     }
   | { t: 'reject'; reason: RejectReason; message: string; nextAt?: number; retryAfterMs?: number }
   | { t: 'notice'; notice: Notice | null }
