@@ -11,11 +11,29 @@ import { join } from 'node:path';
 
 const SHOT_DIR = join(process.cwd(), 'docs', 'screenshots');
 
+/**
+ * Force a language before any app code runs. Without this the UI follows
+ * `navigator.language`, which makes text assertions depend on the machine that
+ * happens to run the suite.
+ */
+async function useLang(page: Page, lang: 'en' | 'zh') {
+  await page.addInitScript((value) => {
+    try {
+      // Seed only: a value already chosen in the page (including by the language
+      // toggle) must win, otherwise a reload would silently undo the user's choice.
+      if (!localStorage.getItem('pc.lang')) localStorage.setItem('pc.lang', value);
+    } catch {
+      /* ignore */
+    }
+  }, lang);
+}
+
 const isMobile = (testInfo: TestInfo) => testInfo.project.name.includes('iphone');
 
 async function waitForCanvas(page: Page) {
   await expect(page.getByTestId('canvas-view')).toBeVisible({ timeout: 45_000 });
-  await expect(page.getByTestId('connection-state')).toHaveText(/live/i, { timeout: 45_000 });
+  // `data-state` is language-independent; the visible label is translated.
+  await expect(page.getByTestId('connection-state')).toHaveAttribute('data-state', 'online', { timeout: 45_000 });
   // The board is painted one frame after the welcome message arrives.
   await page.waitForTimeout(1200);
 }
@@ -36,7 +54,7 @@ const activity = (page: Page, testInfo: TestInfo) =>
 
 async function openPalette(page: Page, testInfo: TestInfo): Promise<boolean> {
   if (isMobile(testInfo)) {
-    await page.getByRole('tab', { name: /colours/i }).click();
+    await page.getByTestId('tab-colours').click();
     await expect(palette(page, testInfo)).toBeVisible();
     return true;
   }
@@ -80,6 +98,7 @@ async function cellColour(page: Page, x: number, y: number): Promise<number | nu
 
 test.describe('Pixel Commons', () => {
   test('loads the canvas, palette, activity panel and X link', async ({ page }, testInfo) => {
+    await useLang(page, 'en');
     await page.goto('./');
     await waitForCanvas(page);
 
@@ -90,7 +109,7 @@ test.describe('Pixel Commons', () => {
 
     // Close the mobile sheet again so the canvas geometry is measurable.
     if (isMobile(testInfo)) {
-      await page.getByRole('tab', { name: /colours/i }).click();
+      await page.getByTestId('tab-colours').click();
       await expect(palette(page, testInfo)).toBeHidden();
     }
 
@@ -115,6 +134,7 @@ test.describe('Pixel Commons', () => {
   test('places a pixel through the canvas and receives the server confirmation', async ({ page }, testInfo) => {
     const x = 150 + Math.floor(Math.random() * 60);
     const y = 150 + Math.floor(Math.random() * 60);
+    await useLang(page, 'en');
     await page.goto(`./?x=${x}&y=${y}&z=14`);
     await waitForCanvas(page);
     await page.waitForTimeout(600);
@@ -130,9 +150,9 @@ test.describe('Pixel Commons', () => {
     // The activity feed is reachable on every viewport (sidebar on desktop, sheet
     // on phones) and always renders either entries or its empty state.
     if (isMobile(testInfo)) {
-      await page.getByRole('tab', { name: /activity/i }).click();
+      await page.getByTestId('tab-activity').click();
       await expect(activity(page, testInfo).or(page.locator('.mobile-sheet .empty'))).toBeVisible();
-      await page.locator('.mobile-sheet .modal-head button').click();
+      await page.getByTestId('sheet-close').click();
     } else {
       await expect(page.getByTestId('activity-list').or(page.locator('.activity-panel .empty'))).toBeVisible();
     }
@@ -146,23 +166,26 @@ test.describe('Pixel Commons', () => {
   });
 
   test('cooldown CTA reflects the server deadline', async ({ page }) => {
+    await useLang(page, 'en');
     await page.goto('./');
     await waitForCanvas(page);
 
     const cta = page.getByTestId('place-cta');
     await expect(cta).toBeVisible();
     const text = ((await cta.textContent()) ?? '').replace(/\s+/g, '');
-    // Either "Ready" or a countdown such as "29.4s" 閳?never a client-invented value.
-    expect(/ready|\d+(\.\d+)?s/i.test(text)).toBeTruthy();
+    // Either the localised "ready" label or a countdown such as "29.4s" -
+    // never a client-invented value.
+    expect(/ready|\u5c31\u7eea|\d+(\.\d+)?s/i.test(text)).toBeTruthy();
 
     // The progress bar is bound to the same deadline.
     await expect(page.locator('.cooldown-track')).toBeVisible();
   });
 
   test('history dialog exposes server-rendered export links', async ({ page }) => {
+    await useLang(page, 'en');
     await page.goto('./');
     await waitForCanvas(page);
-    await page.getByTitle('History & snapshots').click();
+    await page.getByTestId('nav-history').click();
     await expect(page.getByTestId('export-1x')).toHaveAttribute('href', /\/api\/export\.png\?scale=1/);
     await expect(page.getByTestId('export-4x')).toHaveAttribute('href', /scale=4/);
 
@@ -177,11 +200,14 @@ test.describe('Pixel Commons', () => {
   });
 
   test('help dialog documents rules and controls', async ({ page }) => {
+    await useLang(page, 'en');
     await page.goto('./');
     await waitForCanvas(page);
-    await page.getByTitle('Rules & help').click();
-    await expect(page.getByRole('heading', { name: /How Pixel Commons works/i })).toBeVisible();
-    await expect(page.getByText(/enforced by the server/i)).toBeVisible();
+    await page.getByTestId('nav-help').click();
+    // The heading is translated, so assert structure, not English copy.
+    await expect(page.locator('.modal .help-grid')).toBeVisible();
+    await expect(page.locator('.modal .rules li').first()).toBeVisible();
+    await expect(page.locator('.modal .rules li')).toHaveCount(4 + 3 + 3);
     await page.screenshot({ path: join(SHOT_DIR, 'help-dialog.png') });
   });
 
@@ -191,8 +217,10 @@ test.describe('Pixel Commons', () => {
     const a = await contextA.newPage();
     const b = await contextB.newPage();
 
+    await useLang(a, 'en');
     await a.goto('./');
     await waitForCanvas(a);
+    await useLang(b, 'en');
     await b.goto('./');
     await waitForCanvas(b);
     await b.waitForTimeout(1500);
@@ -216,6 +244,7 @@ test.describe('Pixel Commons', () => {
   });
 
   test('reconnects automatically after the network drops', async ({ page }) => {
+    await useLang(page, 'en');
     await page.goto('./');
     await waitForCanvas(page);
 
@@ -223,27 +252,28 @@ test.describe('Pixel Commons', () => {
     await expect(page.getByTestId('connection-banner')).toBeVisible({ timeout: 20_000 });
 
     await page.context().setOffline(false);
-    await expect(page.getByTestId('connection-state')).toHaveText(/live/i, { timeout: 60_000 });
+    await expect(page.getByTestId('connection-state')).toHaveAttribute('data-state', 'online', { timeout: 60_000 });
     await expect(page.getByTestId('connection-banner')).toBeHidden();
   });
 
   test('phone layout keeps the canvas usable and controls reachable', async ({ page }, testInfo) => {
     test.skip(!isMobile(testInfo), 'iPhone-only layout assertions');
 
+    await useLang(page, 'en');
     await page.goto('./');
     await waitForCanvas(page);
 
     // Colours are reachable through the floating sheet, and picking one closes it
     // so the canvas is never blocked by a panel.
-    await page.getByRole('tab', { name: /colours/i }).click();
+    await page.getByTestId('tab-colours').click();
     await expect(palette(page, testInfo)).toBeVisible();
     await swatch(page, testInfo, 11).click();
     await expect(palette(page, testInfo)).toBeHidden();
 
     // The activity sheet works the same way.
-    await page.getByRole('tab', { name: /activity/i }).click();
+    await page.getByTestId('tab-activity').click();
     await expect(activity(page, testInfo).or(page.locator('.mobile-sheet .empty'))).toBeVisible();
-    await page.locator('.mobile-sheet .modal-head button').click();
+    await page.getByTestId('sheet-close').click();
 
     // Nothing may overflow horizontally on a 390px viewport.
     const overflow = await page.evaluate(
@@ -271,5 +301,44 @@ test.describe('Pixel Commons', () => {
     await expect(page.getByTestId('zoom-readout')).not.toHaveText('');
 
     await page.screenshot({ path: join(SHOT_DIR, 'iphone.png') });
+  });
+
+  test('language toggle switches the whole interface and survives a reload', async ({ page }, testInfo) => {
+    await useLang(page, 'en');
+    await page.goto('./');
+    await waitForCanvas(page);
+
+    const tagline = page.locator('.brand-text small');
+    const paletteTitle = page.locator('.side .palette-panel h2');
+
+    // English baseline.
+    await expect(tagline).toHaveText(/one canvas/i);
+    await expect(paletteTitle).toHaveText(/palette/i);
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+
+    // Switch to Chinese: the document language, the copy and the button all change.
+    await page.getByTestId('lang-toggle').click();
+    await expect(page.locator('html')).toHaveAttribute('lang', 'zh-Hans');
+    await expect(tagline).toHaveText(/画布/);
+    await expect(paletteTitle).toHaveText('调色板');
+    await expect(page.getByTestId('lang-toggle')).toContainText('EN');
+
+    // The choice persists across a reload (cookie-free, localStorage only).
+    await page.reload({ waitUntil: 'load' });
+    await waitForCanvas(page);
+    await expect(page.locator('html')).toHaveAttribute('lang', 'zh-Hans');
+    await expect(paletteTitle).toHaveText('调色板');
+
+    // Dialogs are translated too, not just the sidebar.
+    await page.getByTestId('nav-help').click();
+    await expect(page.locator('.modal-head h2')).toHaveText('Pixel Commons 玩法说明');
+    await page.keyboard.press('Escape');
+
+    // And back again.
+    await page.getByTestId('lang-toggle').click();
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+    await expect(paletteTitle).toHaveText(/palette/i);
+
+    await page.screenshot({ path: join(SHOT_DIR, `lang-toggle-${testInfo.project.name}.png`) });
   });
 });

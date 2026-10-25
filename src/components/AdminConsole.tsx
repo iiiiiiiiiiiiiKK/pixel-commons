@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError } from '../lib/api';
+import { useT } from '../lib/i18n';
 import { Modal } from './Panels';
 
 type AdminView = Awaited<ReturnType<typeof api.adminView>>;
@@ -20,6 +21,7 @@ export default function AdminConsole({
   onNotice: (message: string, kind: 'ok' | 'error' | 'info') => void;
   onRefresh: () => void;
 }) {
+  const { t, locale } = useT();
   const [token, setToken] = useState('');
   const [view, setView] = useState<AdminView | null>(null);
   const [busy, setBusy] = useState(false);
@@ -34,11 +36,11 @@ export default function AdminConsole({
     try {
       setView(await api.adminView());
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not load the admin view.');
+      setError(err instanceof ApiError ? err.message : t('admin.loadFailed'));
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (isAdmin) void loadView();
@@ -51,9 +53,9 @@ export default function AdminConsole({
       await api.adminLogin(token.trim());
       setToken('');
       await loadView();
-      onNotice('Admin signed in.', 'ok');
+      onNotice(t('admin.signedIn'), 'ok');
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Sign-in failed.');
+      setError(err instanceof ApiError ? err.message : t('admin.signInFailed'));
     } finally {
       setBusy(false);
     }
@@ -64,11 +66,13 @@ export default function AdminConsole({
     setError(null);
     try {
       const result = await api.adminAction(body);
-      onNotice(result.message || success, result.ok ? 'ok' : 'error');
+      // The server's message is the source of truth; it is English-only today, so a
+      // successful action shows the localised confirmation instead when they differ.
+      onNotice(result.ok ? success : result.message, result.ok ? 'ok' : 'error');
       await loadView();
       onRefresh();
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : 'Action failed.';
+      const message = err instanceof ApiError ? err.message : t('admin.actionFailed');
       setError(message);
       onNotice(message, 'error');
     } finally {
@@ -78,13 +82,10 @@ export default function AdminConsole({
 
   if (!isAdmin) {
     return (
-      <Modal title="Admin sign-in" onClose={onClose}>
-        <p className="fineprint">
-          Admins can reset the canvas, publish maintenance notices, undo the last pixel and open the reports queue.
-          The token is verified on the server and exchanged for a short-lived signed cookie.
-        </p>
+      <Modal title={t('admin.signInTitle')} onClose={onClose}>
+        <p className="fineprint">{t('admin.signInIntro')}</p>
         <label className="field">
-          <span>Admin token</span>
+          <span>{t('admin.tokenLabel')}</span>
           <input
             type="password"
             value={token}
@@ -97,13 +98,23 @@ export default function AdminConsole({
             data-testid="admin-token"
           />
         </label>
-        {error && <p className="error-text" data-testid="admin-error">{error}</p>}
+        {error && (
+          <p className="error-text" data-testid="admin-error">
+            {error}
+          </p>
+        )}
         <div className="modal-actions">
           <button type="button" className="ghost-btn" onClick={onClose}>
-            cancel
+            {t('admin.cancel')}
           </button>
-          <button type="button" className="primary-btn" disabled={busy || !token} onClick={() => void login()} data-testid="admin-login">
-            {busy ? 'checking…' : 'sign in'}
+          <button
+            type="button"
+            className="primary-btn"
+            disabled={busy || !token}
+            onClick={() => void login()}
+            data-testid="admin-login"
+          >
+            {busy ? t('admin.checking') : t('admin.signIn')}
           </button>
         </div>
       </Modal>
@@ -111,28 +122,32 @@ export default function AdminConsole({
   }
 
   return (
-    <Modal title="Admin console" onClose={onClose} wide>
-      {error && <p className="error-text" data-testid="admin-error">{error}</p>}
+    <Modal title={t('admin.title')} onClose={onClose} wide>
+      {error && (
+        <p className="error-text" data-testid="admin-error">
+          {error}
+        </p>
+      )}
 
       <div className="admin-grid">
         <section>
-          <h3 className="sub-head">Broadcast notice</h3>
+          <h3 className="sub-head">{t('admin.broadcast')}</h3>
           <label className="field">
-            <span>Level</span>
+            <span>{t('admin.level')}</span>
             <select value={noticeLevel} onChange={(event) => setNoticeLevel(event.target.value as typeof noticeLevel)}>
-              <option value="info">info</option>
-              <option value="warn">warn</option>
-              <option value="maintenance">maintenance (blocks painting)</option>
+              <option value="info">{t('admin.levelInfo')}</option>
+              <option value="warn">{t('admin.levelWarn')}</option>
+              <option value="maintenance">{t('admin.levelMaintenance')}</option>
             </select>
           </label>
           <label className="field">
-            <span>Message</span>
+            <span>{t('admin.message')}</span>
             <textarea
               rows={2}
               maxLength={280}
               value={noticeText}
               onChange={(event) => setNoticeText(event.target.value)}
-              placeholder="Theme day: build a tiny garden in the bottom-left quadrant"
+              placeholder={t('admin.messagePlaceholder')}
               data-testid="notice-text"
             />
           </label>
@@ -141,39 +156,41 @@ export default function AdminConsole({
               type="button"
               className="primary-btn"
               disabled={busy || noticeText.trim().length === 0}
-              onClick={() => void run({ action: 'notice', value: noticeText, status: noticeLevel }, 'Notice published.')}
+              onClick={() =>
+                void run({ action: 'notice', value: noticeText, status: noticeLevel }, t('admin.publishDone'))
+              }
               data-testid="publish-notice"
             >
-              publish
+              {t('admin.publish')}
             </button>
             <button
               type="button"
               className="ghost-btn"
               disabled={busy}
-              onClick={() => void run({ action: 'clearNotice' }, 'Notice cleared.')}
+              onClick={() => void run({ action: 'clearNotice' }, t('admin.clearDone'))}
               data-testid="clear-notice"
             >
-              clear
+              {t('admin.clear')}
             </button>
           </div>
 
-          <h3 className="sub-head">Canvas</h3>
+          <h3 className="sub-head">{t('admin.canvas')}</h3>
           <div className="row gap wrap">
             <button
               type="button"
               className="ghost-btn"
               disabled={busy}
-              onClick={() => void run({ action: 'undo' }, 'Undone.')}
+              onClick={() => void run({ action: 'undo' }, t('admin.undoDone'))}
               data-testid="admin-undo"
             >
-              undo last pixel
+              {t('admin.undo')}
             </button>
             <a className="ghost-btn" href="/api/export.png?scale=4" target="_blank" rel="noreferrer">
-              export PNG
+              {t('admin.exportPng')}
             </a>
           </div>
           <label className="field">
-            <span>Type RESET to clear the whole canvas</span>
+            <span>{t('admin.resetLabel')}</span>
             <input value={confirmReset} onChange={(event) => setConfirmReset(event.target.value)} placeholder="RESET" />
           </label>
           <button
@@ -181,21 +198,24 @@ export default function AdminConsole({
             className="danger-btn"
             disabled={busy || confirmReset !== 'RESET'}
             onClick={() => {
-              void run({ action: 'reset' }, 'Canvas reset.');
+              void run({ action: 'reset' }, t('admin.resetDone'));
               setConfirmReset('');
             }}
             data-testid="admin-reset"
           >
-            reset canvas
+            {t('admin.reset')}
           </button>
         </section>
 
         <section>
-          <h3 className="sub-head">Reports {view ? `(${view.reports.filter((r) => r.status === 'open').length} open)` : ''}</h3>
+          <h3 className="sub-head">
+            {t('admin.reports')}{' '}
+            {view ? t('admin.openCount', { count: view.reports.filter((r) => r.status === 'open').length }) : ''}
+          </h3>
           {!view ? (
-            <p className="fineprint">loading…</p>
+            <p className="fineprint">{t('admin.loading')}</p>
           ) : view.reports.length === 0 ? (
-            <p className="fineprint">No reports yet.</p>
+            <p className="fineprint">{t('admin.noReports')}</p>
           ) : (
             <ul className="report-list" data-testid="report-list">
               {view.reports.slice(0, 12).map((report) => (
@@ -206,7 +226,7 @@ export default function AdminConsole({
                     </strong>{' '}
                     <span className={`chip ${report.status}`}>{report.status}</span>
                     <small>
-                      {report.reason} · {new Date(report.at).toLocaleString()}
+                      {report.reason} · {new Date(report.at).toLocaleString(locale)}
                       {report.note ? ` · ${report.note}` : ''}
                     </small>
                   </div>
@@ -216,17 +236,21 @@ export default function AdminConsole({
                         type="button"
                         className="ghost-btn small"
                         disabled={busy}
-                        onClick={() => void run({ action: 'resolveReport', id: report.id, status: 'resolved' }, 'Resolved.')}
+                        onClick={() =>
+                          void run({ action: 'resolveReport', id: report.id, status: 'resolved' }, t('admin.resolve'))
+                        }
                       >
-                        resolve
+                        {t('admin.resolve')}
                       </button>
                       <button
                         type="button"
                         className="ghost-btn small"
                         disabled={busy}
-                        onClick={() => void run({ action: 'resolveReport', id: report.id, status: 'rejected' }, 'Rejected.')}
+                        onClick={() =>
+                          void run({ action: 'resolveReport', id: report.id, status: 'rejected' }, t('admin.reject'))
+                        }
                       >
-                        reject
+                        {t('admin.reject')}
                       </button>
                     </div>
                   )}
@@ -237,17 +261,17 @@ export default function AdminConsole({
         </section>
 
         <section>
-          <h3 className="sub-head">Audit trail</h3>
+          <h3 className="sub-head">{t('admin.audit')}</h3>
           {!view ? (
-            <p className="fineprint">loading…</p>
+            <p className="fineprint">{t('admin.loading')}</p>
           ) : view.audit.length === 0 ? (
-            <p className="fineprint">No admin actions recorded yet.</p>
+            <p className="fineprint">{t('admin.noAudit')}</p>
           ) : (
             <ul className="audit-list" data-testid="audit-list">
               {view.audit.map((entry) => (
                 <li key={entry.id}>
                   <span className="mono">{entry.action}</span> {entry.detail}
-                  <small>{new Date(entry.at).toLocaleString()}</small>
+                  <small>{new Date(entry.at).toLocaleString(locale)}</small>
                 </li>
               ))}
             </ul>

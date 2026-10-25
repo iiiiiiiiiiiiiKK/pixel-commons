@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Cell, ServerConfig } from '../../shared/protocol';
+import { useT } from '../lib/i18n';
 
 export type Viewport = { scale: number; offsetX: number; offsetY: number };
 
@@ -51,6 +52,7 @@ export default function PixelCanvas({
   onViewportChange,
   children,
 }: Props) {
+  const { t } = useT();
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<HTMLCanvasElement | null>(null);
   const boardRef = useRef<HTMLCanvasElement | null>(null);
@@ -483,20 +485,20 @@ export default function PixelCanvas({
         }}
         onWheel={onWheel}
         role="application"
-        aria-label="Shared pixel canvas"
+        aria-label={t('app.canvasAria')}
         data-testid="canvas-host"
       >
         <canvas ref={viewRef} className="canvas-view" data-testid="canvas-view" />
         {children}
       </div>
-      <div className="zoom-controls" role="group" aria-label="Zoom controls">
-        <button type="button" onClick={() => zoomBy(1.35)} aria-label="Zoom in" data-testid="zoom-in">
+      <div className="zoom-controls" role="group" aria-label={t('app.zoomControls')}>
+        <button type="button" onClick={() => zoomBy(1.35)} aria-label={t('app.zoomIn')} data-testid="zoom-in">
           +
         </button>
-        <button type="button" onClick={() => zoomBy(1 / 1.35)} aria-label="Zoom out" data-testid="zoom-out">
+        <button type="button" onClick={() => zoomBy(1 / 1.35)} aria-label={t('app.zoomOut')} data-testid="zoom-out">
           −
         </button>
-        <button type="button" onClick={fit} aria-label="Fit canvas to screen" data-testid="zoom-fit">
+        <button type="button" onClick={fit} aria-label={t('app.zoomFit')} data-testid="zoom-fit">
           fit
         </button>
         <span className="zoom-readout" data-testid="zoom-readout">

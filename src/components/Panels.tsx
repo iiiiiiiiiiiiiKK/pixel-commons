@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { HistoryEntry, Notice, Player, ServerConfig } from '../../shared/protocol';
-import { REPORT_REASON_LABELS, type ReportReason } from '../../shared/protocol';
+import { type ReportReason } from '../../shared/protocol';
 import type { CanvasSocket, ConnectionState } from '../lib/useCanvasSocket';
 import { exportPngUrl, snapshotPngUrl } from '../lib/api';
+import { reasonKeys, useT } from '../lib/i18n';
 
 /* -------------------------------------------------------------------------- */
 /*                                   header                                   */
@@ -29,13 +30,15 @@ export function Header({
   isAdmin: boolean;
   adminEnabled: boolean;
 }) {
+  const { t, lang, toggle } = useT();
   const stateLabel: Record<ConnectionState, string> = {
-    connecting: 'connecting',
-    online: 'live',
-    offline: 'offline',
-    reconnecting: 'reconnecting',
-    fatal: 'session expired',
+    connecting: t('state.connecting'),
+    online: t('state.online'),
+    offline: t('state.offline'),
+    reconnecting: t('state.reconnecting'),
+    fatal: t('state.fatal'),
   };
+
   return (
     <header className="app-header">
       <div className="brand">
@@ -44,46 +47,68 @@ export function Header({
         </span>
         <span className="brand-text">
           <strong>Pixel Commons</strong>
-          <small>one canvas · everyone draws</small>
+          <small>{t('brand.tagline')}</small>
         </span>
       </div>
 
       <div className="header-stats">
         <span className={`live-dot ${state}`} aria-hidden="true" />
-        <span data-testid="connection-state" className="stat">
+        <span data-testid="connection-state" className="stat" data-state={state}>
           {stateLabel[state]}
         </span>
-        <span className="stat" data-testid="online-count" title="People currently connected">
-          <b>{online}</b> online
+        <span className="stat" data-testid="online-count" title={t('header.onlineTitle')}>
+          <b>{online}</b> {t('header.onlineCount')}
         </span>
-        <span className="stat hide-sm" title="Total accepted pixels">
-          <b>{totalPixels.toLocaleString()}</b> pixels
+        <span className="stat hide-sm" title={t('header.pixelsTitle')}>
+          <b>{totalPixels.toLocaleString()}</b> {t('header.pixelCount')}
         </span>
         {latency !== null && (
-          <span className="stat hide-md" title="Round-trip latency">
+          <span className="stat hide-md" title={t('header.latencyTitle')}>
             <b>{latency}</b> ms
           </span>
         )}
       </div>
 
       <nav className="header-nav">
-        <button type="button" className="icon-btn" onClick={onOpenGallery} title="History & snapshots">
-          <span aria-hidden="true">◷</span>
-          <span className="hide-sm">History</span>
+        <button
+          type="button"
+          className="icon-btn lang-btn"
+          onClick={toggle}
+          title={t('lang.switchTo')}
+          aria-label={t('lang.switchTo')}
+          data-testid="lang-toggle"
+          data-lang={lang}
+        >
+          <span className="lang-glyph" aria-hidden="true">
+            <b>A</b>
+            <i>文</i>
+          </span>
+          <span className="hide-sm">{t('lang.label')}</span>
         </button>
-        <button type="button" className="icon-btn" onClick={onOpenHelp} title="Rules & help">
+        <button
+          type="button"
+          className="icon-btn"
+          onClick={onOpenGallery}
+          title={t('nav.historyTitle')}
+          data-testid="nav-history"
+        >
+          <span aria-hidden="true">◷</span>
+          <span className="hide-sm">{t('nav.history')}</span>
+        </button>
+        <button type="button" className="icon-btn" onClick={onOpenHelp} title={t('nav.helpTitle')} data-testid="nav-help">
           <span aria-hidden="true">?</span>
-          <span className="hide-sm">Help</span>
+          <span className="hide-sm">{t('nav.help')}</span>
         </button>
         {adminEnabled && (
           <button
             type="button"
             className={`icon-btn ${isAdmin ? 'active' : ''}`}
             onClick={onOpenAdmin}
-            title="Admin console"
+            title={t('nav.adminTitle')}
+            data-testid="nav-admin"
           >
             <span aria-hidden="true">⚙</span>
-            <span className="hide-sm">Admin</span>
+            <span className="hide-sm">{t('nav.admin')}</span>
           </button>
         )}
         <a
@@ -91,8 +116,8 @@ export function Header({
           href="https://x.com/0xkillcoin"
           target="_blank"
           rel="noreferrer noopener"
-          title="Follow the maker on X"
-          aria-label="Follow the maker on X (@0xkillcoin)"
+          title={t('nav.xTitle')}
+          aria-label={t('nav.xTitle')}
           data-testid="x-link"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true" width="16" height="16">
@@ -125,6 +150,7 @@ export function CooldownBar({
   canPlace: boolean;
   onTryPlace: () => void;
 }) {
+  const { t } = useT();
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 250);
@@ -143,19 +169,25 @@ export function CooldownBar({
         onClick={onTryPlace}
         disabled={!canPlace}
         data-testid="place-cta"
-        title={canPlace ? 'Place a pixel (or tap the canvas)' : 'Waiting for the server'}
+        title={canPlace ? t('cooldown.placeTitle') : t('cooldown.waitingTitle')}
       >
-        {ready ? 'Ready' : `${(remaining / 1000).toFixed(1)}s`}
+        {ready ? t('cooldown.ready') : `${(remaining / 1000).toFixed(1)}s`}
       </button>
-      <div className="cooldown-track" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(ratio * 100)}>
+      <div
+        className="cooldown-track"
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(ratio * 100)}
+      >
         <div className="cooldown-fill" style={{ width: `${(1 - ratio) * 100}%` }} />
       </div>
       <span className="cooldown-hint" data-testid="cooldown-hint">
         {state !== 'online'
-          ? 'offline — server decides when you can paint'
+          ? t('cooldown.offlineHint')
           : ready
-            ? 'pick a colour, tap the canvas'
-            : 'server-enforced cooldown'}
+            ? t('cooldown.readyHint')
+            : t('cooldown.waitingHint')}
       </span>
     </div>
   );
@@ -179,6 +211,7 @@ export function Palette({
   onSelect: (index: number) => void;
   cooldownReady: boolean;
 }) {
+  const { t } = useT();
   const [recent, setRecent] = useState<number[]>(() => {
     try {
       const raw = localStorage.getItem(RECENT_KEY);
@@ -211,10 +244,12 @@ export function Palette({
   const nearest = useMemo(() => nearestPaletteIndex(palette, custom), [palette, custom]);
 
   return (
-    <section className="panel palette-panel" aria-label="Colour palette" data-testid="palette">
+    <section className="panel palette-panel" aria-label={t('palette.aria')} data-testid="palette">
       <div className="panel-head">
-        <h2>Palette</h2>
-        <span className={`chip ${cooldownReady ? 'ok' : ''}`}>{cooldownReady ? 'ready' : 'cooling'}</span>
+        <h2>{t('palette.title')}</h2>
+        <span className={`chip ${cooldownReady ? 'ok' : ''}`}>
+          {cooldownReady ? t('palette.ready') : t('palette.cooling')}
+        </span>
       </div>
 
       <div className="swatches">
@@ -225,7 +260,7 @@ export function Palette({
             className={`swatch ${selected === index ? 'selected' : ''}`}
             style={{ background: hex }}
             onClick={() => pick(index)}
-            aria-label={`Colour ${hex}`}
+            aria-label={t('palette.colour', { hex })}
             aria-pressed={selected === index}
             data-testid={`swatch-${index}`}
             title={hex}
@@ -235,7 +270,7 @@ export function Palette({
 
       {recent.length > 0 && (
         <>
-          <h3 className="sub-head">Recent</h3>
+          <h3 className="sub-head">{t('palette.recent')}</h3>
           <div className="swatches small">
             {recent.map((index) => (
               <button
@@ -244,19 +279,19 @@ export function Palette({
                 className={`swatch ${selected === index ? 'selected' : ''}`}
                 style={{ background: palette[index] ?? '#000' }}
                 onClick={() => pick(index)}
-                aria-label={`Recent colour ${palette[index]}`}
+                aria-label={t('palette.recentColour', { hex: palette[index] ?? '' })}
               />
             ))}
           </div>
         </>
       )}
 
-      <h3 className="sub-head">Custom → nearest palette</h3>
+      <h3 className="sub-head">{t('palette.customHead')}</h3>
       <div className="custom-row">
         <input
           type="color"
           value={custom}
-          aria-label="Custom colour"
+          aria-label={t('palette.customAria')}
           onChange={(event) => {
             setCustom(event.target.value);
             try {
@@ -267,13 +302,10 @@ export function Palette({
           }}
         />
         <button type="button" className="ghost-btn" onClick={() => pick(nearest)} data-testid="apply-custom">
-          use #{nearest} · {palette[nearest]}
+          {t('palette.apply', { index: nearest, hex: palette[nearest] ?? '' })}
         </button>
       </div>
-      <p className="fineprint">
-        The canvas stores palette indices, so a custom colour snaps to its closest palette entry — that keeps the
-        artwork consistent and the socket payload one byte per pixel.
-      </p>
+      <p className="fineprint">{t('palette.footnote')}</p>
     </section>
   );
 }
@@ -320,39 +352,44 @@ export function ActivityFeed({
   players: Player[];
   handle: string;
 }) {
+  const { t } = useT();
   return (
-    <section className="panel activity-panel" aria-label="Recent activity">
+    <section className="panel activity-panel" aria-label={t('activity.aria')}>
       <div className="panel-head">
-        <h2>Live activity</h2>
-        <span className="chip">{history.length === 0 ? 'quiet' : `${history.length} moves`}</span>
+        <h2>{t('activity.title')}</h2>
+        <span className="chip">
+          {history.length === 0 ? t('activity.quiet') : t('activity.moves', { count: history.length })}
+        </span>
       </div>
 
       {history.length === 0 ? (
-        <p className="empty">No pixels yet. Place the very first one - it will be in the history forever.</p>
+        <p className="empty">{t('activity.empty')}</p>
       ) : (
         <ul className="activity-list" data-testid="activity-list">
           {history.slice(0, 14).map((entry) => (
             <li key={entry.id}>
-              <button type="button" onClick={() => onJump(entry.x, entry.y)} title="Centre the canvas here">
+              <button type="button" onClick={() => onJump(entry.x, entry.y)} title={t('activity.jumpTitle')}>
                 <span className="dot" style={{ background: palette[entry.c] ?? '#000' }} />
-                <span className="mono">({entry.x},{entry.y})</span>
-                <span className="who">{entry.by === handle ? 'you' : entry.by}</span>
-                <time>{timeAgo(entry.at)}</time>
+                <span className="mono">
+                  ({entry.x},{entry.y})
+                </span>
+                <span className="who">{entry.by === handle ? t('activity.you') : entry.by}</span>
+                <time>{timeAgo(entry.at, t)}</time>
               </button>
             </li>
           ))}
         </ul>
       )}
 
-      <h3 className="sub-head">Top painters</h3>
+      <h3 className="sub-head">{t('activity.topPainters')}</h3>
       {players.length === 0 ? (
-        <p className="fineprint">Rankings appear after the first pixels land.</p>
+        <p className="fineprint">{t('activity.rankEmpty')}</p>
       ) : (
         <ol className="leaderboard" data-testid="leaderboard">
           {players.slice(0, 6).map((player, index) => (
             <li key={player.handle + index}>
               <span className="rank">{index + 1}</span>
-              <span className="who">{player.handle === handle ? 'you' : player.handle}</span>
+              <span className="who">{player.handle === handle ? t('activity.you') : player.handle}</span>
               <span className="mono">{player.pixels}p</span>
             </li>
           ))}
@@ -362,9 +399,9 @@ export function ActivityFeed({
   );
 }
 
-export function timeAgo(at: number): string {
+export function timeAgo(at: number, t?: (key: 'activity.now') => string): string {
   const diff = Math.max(0, Date.now() - at);
-  if (diff < 5_000) return 'now';
+  if (diff < 5_000) return t ? t('activity.now') : 'now';
   if (diff < 60_000) return `${Math.floor(diff / 1000)}s`;
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`;
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h`;
@@ -376,12 +413,13 @@ export function timeAgo(at: number): string {
 /* -------------------------------------------------------------------------- */
 
 export function NoticeBanner({ notice, onDismiss }: { notice: Notice; onDismiss?: () => void }) {
+  const { t } = useT();
   return (
     <div className={`notice ${notice.level}`} role="status">
       <span className="notice-level">{notice.level}</span>
       <span className="notice-text">{notice.message}</span>
       {onDismiss && (
-        <button type="button" className="ghost-btn small" onClick={onDismiss} aria-label="Dismiss">
+        <button type="button" className="ghost-btn small" onClick={onDismiss} aria-label={t('notice.dismiss')}>
           ×
         </button>
       )}
@@ -398,28 +436,31 @@ export function ConnectionBanner({
   attempts: number;
   onRetry: () => void;
 }) {
+  const { t } = useT();
   if (state === 'online' || state === 'connecting') return null;
   if (state === 'fatal') {
     return (
       <div className="notice warn" role="alert">
-        <span className="notice-level">session</span>
-        <span className="notice-text">Your session expired. Reload the page to get a fresh anonymous identity.</span>
+        <span className="notice-level">{t('conn.sessionLevel')}</span>
+        <span className="notice-text">{t('conn.sessionText')}</span>
         <button type="button" className="ghost-btn small" onClick={() => location.reload()}>
-          reload
+          {t('conn.reload')}
         </button>
       </div>
     );
   }
   return (
     <div className="notice warn" role="alert" data-testid="connection-banner">
-      <span className="notice-level">{state === 'offline' ? 'offline' : 'retrying'}</span>
+      <span className="notice-level">
+        {state === 'offline' ? t('conn.offlineLevel') : t('conn.retryLevel')}
+      </span>
       <span className="notice-text">
         {state === 'offline'
-          ? 'You are offline. Pixels cannot be sent until the connection returns.'
-          : `Reconnecting to the canvas${attempts > 1 ? ` (attempt ${attempts})` : ''}…`}
+          ? t('conn.offlineText')
+          : `${t('conn.retryText')}${attempts > 1 ? t('conn.retryAttempt', { count: attempts }) : ''}…`}
       </span>
       <button type="button" className="ghost-btn small" onClick={onRetry}>
-        retry now
+        {t('conn.retryNow')}
       </button>
     </div>
   );
@@ -440,6 +481,7 @@ export function Modal({
   children: React.ReactNode;
   wide?: boolean;
 }) {
+  const { t } = useT();
   const ref = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -463,7 +505,7 @@ export function Modal({
       >
         <div className="modal-head">
           <h2>{title}</h2>
-          <button type="button" className="ghost-btn" onClick={onClose} aria-label="Close">
+          <button type="button" className="ghost-btn" onClick={onClose} aria-label={t('modal.close')}>
             ×
           </button>
         </div>
@@ -482,41 +524,43 @@ export function ReportDialog({
   onClose: () => void;
   onSubmit: (reason: ReportReason, note: string) => void;
 }) {
+  const { t } = useT();
   const [reason, setReason] = useState<ReportReason>('offensive');
   const [note, setNote] = useState('');
   return (
-    <Modal title={`Report pixel (${cell.x}, ${cell.y})`} onClose={onClose}>
-      <p className="fineprint">
-        Reports go to a moderation queue with the offending coordinate, never to the public timeline. Misuse of the
-        report form is rate limited per session.
-      </p>
+    <Modal title={t('report.title', { x: cell.x, y: cell.y })} onClose={onClose}>
+      <p className="fineprint">{t('report.intro')}</p>
       <label className="field">
-        <span>Reason</span>
-        <select value={reason} onChange={(event) => setReason(event.target.value as ReportReason)} data-testid="report-reason">
-          {Object.entries(REPORT_REASON_LABELS).map(([value, label]) => (
+        <span>{t('report.reason')}</span>
+        <select
+          value={reason}
+          onChange={(event) => setReason(event.target.value as ReportReason)}
+          data-testid="report-reason"
+        >
+          {(Object.keys(reasonKeys) as ReportReason[]).map((value) => (
             <option key={value} value={value}>
-              {label}
+              {t(reasonKeys[value])}
             </option>
           ))}
         </select>
       </label>
       <label className="field">
-        <span>Details (optional)</span>
+        <span>{t('report.details')}</span>
         <textarea
           value={note}
           maxLength={280}
           rows={3}
           onChange={(event) => setNote(event.target.value)}
-          placeholder="What is wrong with this area?"
+          placeholder={t('report.placeholder')}
           data-testid="report-note"
         />
       </label>
       <div className="modal-actions">
         <button type="button" className="ghost-btn" onClick={onClose}>
-          cancel
+          {t('report.cancel')}
         </button>
         <button type="button" className="primary-btn" onClick={() => onSubmit(reason, note)} data-testid="report-submit">
-          send report
+          {t('report.submit')}
         </button>
       </div>
     </Modal>
@@ -534,47 +578,50 @@ export function HistoryDialog({
   onJump: (x: number, y: number) => void;
   config: ServerConfig | null;
 }) {
+  const { t, locale } = useT();
   return (
-    <Modal title="History & snapshots" onClose={onClose} wide>
+    <Modal title={t('history.title')} onClose={onClose} wide>
       <div className="history-grid">
         <div>
-          <h3 className="sub-head">Download</h3>
-          <p className="fineprint">
-            The export is rendered server-side from the authoritative canvas, so it always matches what everyone else
-            sees.
-          </p>
+          <h3 className="sub-head">{t('history.download')}</h3>
+          <p className="fineprint">{t('history.exportNote')}</p>
           <div className="row gap">
-            <a className="primary-btn" href={exportPngUrl(1)} download={`pixel-commons-${config?.width ?? 256}.png`} data-testid="export-1x">
-              PNG 1× ({config?.width ?? 256}px)
+            <a
+              className="primary-btn"
+              href={exportPngUrl(1)}
+              download={`pixel-commons-${config?.width ?? 256}.png`}
+              data-testid="export-1x"
+            >
+              {t('history.png1x', { size: config?.width ?? 256 })}
             </a>
             <a className="ghost-btn" href={exportPngUrl(4)} download="pixel-commons-4x.png" data-testid="export-4x">
-              PNG 4×
+              {t('history.png4x')}
             </a>
           </div>
 
-          <h3 className="sub-head">Jump to a coordinate</h3>
+          <h3 className="sub-head">{t('history.jump')}</h3>
           <JumpForm onJump={onJump} maxX={(config?.width ?? 256) - 1} maxY={(config?.height ?? 256) - 1} />
         </div>
 
         <div>
-          <h3 className="sub-head">Time machine</h3>
+          <h3 className="sub-head">{t('history.timeMachine')}</h3>
           {snapshots.length === 0 ? (
-            <p className="fineprint">
-              A snapshot is taken automatically every 10 minutes of drawing activity. None exist yet — paint something
-              and come back.
-            </p>
+            <p className="fineprint">{t('history.snapshotEmpty')}</p>
           ) : (
             <ul className="snapshot-list" data-testid="snapshot-list">
               {snapshots.map((snapshot) => (
                 <li key={snapshot.id}>
                   <div>
-                    <strong>{new Date(snapshot.at).toLocaleString()}</strong>
+                    <strong>{new Date(snapshot.at).toLocaleString(locale)}</strong>
                     <small>
-                      {snapshot.totalPixels.toLocaleString()} pixels · v{snapshot.version}
+                      {t('history.snapshotMeta', {
+                        pixels: snapshot.totalPixels.toLocaleString(),
+                        version: snapshot.version,
+                      })}
                     </small>
                   </div>
                   <a className="ghost-btn small" href={snapshotPngUrl(snapshot.id, 2)} target="_blank" rel="noreferrer">
-                    view
+                    {t('history.view')}
                   </a>
                 </li>
               ))}
@@ -587,6 +634,7 @@ export function HistoryDialog({
 }
 
 function JumpForm({ onJump, maxX, maxY }: { onJump: (x: number, y: number) => void; maxX: number; maxY: number }) {
+  const { t } = useT();
   const [x, setX] = useState('128');
   const [y, setY] = useState('128');
   const submit = () => {
@@ -596,58 +644,67 @@ function JumpForm({ onJump, maxX, maxY }: { onJump: (x: number, y: number) => vo
   };
   return (
     <div className="row gap">
-      <input className="num" value={x} onChange={(event) => setX(event.target.value)} aria-label="X coordinate" />
-      <input className="num" value={y} onChange={(event) => setY(event.target.value)} aria-label="Y coordinate" />
+      <input
+        className="num"
+        value={x}
+        onChange={(event) => setX(event.target.value)}
+        aria-label={t('history.xAria')}
+      />
+      <input
+        className="num"
+        value={y}
+        onChange={(event) => setY(event.target.value)}
+        aria-label={t('history.yAria')}
+      />
       <button type="button" className="primary-btn" onClick={submit} data-testid="jump-go">
-        centre
+        {t('history.centre')}
       </button>
     </div>
   );
 }
 
 export function HelpDialog({ cooldownSeconds, onClose }: { cooldownSeconds: number; onClose: () => void }) {
+  const { t } = useT();
   return (
-    <Modal title="How Pixel Commons works" onClose={onClose} wide>
+    <Modal title={t('help.title')} onClose={onClose} wide>
       <div className="help-grid">
         <section>
-          <h3 className="sub-head">The rules</h3>
+          <h3 className="sub-head">{t('help.rulesHead')}</h3>
           <ul className="rules">
-            <li>One shared canvas. Everyone paints the same artwork.</li>
+            <li>{t('help.rule1')}</li>
             <li>
-              One pixel every <b>{Math.round(cooldownSeconds)} seconds</b>, enforced by the server — refreshing or
-              opening more tabs does not give you extra turns.
+              {t('help.rule2a')} <b>{Math.round(cooldownSeconds)}</b> {t('help.rule2b')}
+              {t('help.rule2c')}
             </li>
-            <li>Pixels are permanent unless an admin resets the canvas.</li>
-            <li>No accounts, no email: you get a signed anonymous session that lasts 30 days.</li>
+            <li>{t('help.rule3')}</li>
+            <li>{t('help.rule4')}</li>
           </ul>
         </section>
         <section>
-          <h3 className="sub-head">Controls</h3>
+          <h3 className="sub-head">{t('help.controlsHead')}</h3>
           <ul className="rules">
             <li>
-              <b>Desktop:</b> scroll to zoom, drag to pan, click to place. Hold <kbd>Shift</kbd> + click a pixel to
-              report it.
+              <b>{t('help.desktopLead')}</b> {t('help.desktopText')}
             </li>
             <li>
-              <b>Phone:</b> pinch to zoom, drag with one finger to pan, tap to place. Long-press a pixel to report it.
+              <b>{t('help.phoneLead')}</b> {t('help.phoneText')}
             </li>
-            <li>Share links look like <code>?x=64&amp;y=96&amp;z=8</code> and open centred on that pixel.</li>
+            <li>
+              {t('help.shareLead')} <code>?x=64&amp;y=96&amp;z=8</code> {t('help.shareText')}
+            </li>
           </ul>
         </section>
         <section>
-          <h3 className="sub-head">Fair play</h3>
+          <h3 className="sub-head">{t('help.fairHead')}</h3>
           <ul className="rules">
-            <li>The client never decides cooldown, colour validity or coordinates — the Durable Object does.</li>
-            <li>Rate limits apply per connection and per session; automated spam is dropped.</li>
-            <li>Content reports are reviewed by admins; the queue and every admin action are logged.</li>
+            <li>{t('help.fair1')}</li>
+            <li>{t('help.fair2')}</li>
+            <li>{t('help.fair3')}</li>
           </ul>
         </section>
         <section>
-          <h3 className="sub-head">Open source</h3>
-          <p className="fineprint">
-            Pixel Commons is MIT licensed. Fork it, run your own canvas, or deploy it to your own Cloudflare account —
-            the README walks through the whole thing.
-          </p>
+          <h3 className="sub-head">{t('help.ossHead')}</h3>
+          <p className="fineprint">{t('help.ossText')}</p>
         </section>
       </div>
     </Modal>

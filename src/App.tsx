@@ -3,6 +3,7 @@ import type { Cell, ServerConfig } from '../shared/protocol';
 import { unpackRle, base64UrlToBytes } from '../shared/rle';
 import { api, ApiError, isStaticBuild, apiBase } from './lib/api';
 import { useCanvasSocket } from './lib/useCanvasSocket';
+import { useT, type MessageKey } from './lib/i18n';
 import PixelCanvas from './components/PixelCanvas';
 import AdminConsole from './components/AdminConsole';
 import {
@@ -32,7 +33,21 @@ function readShareTarget(): ShareTarget {
   return null;
 }
 
+/** Server rejections carry a stable reason code, which is what gets localised. */
+const REJECT_KEYS: Record<string, MessageKey> = {
+  cooldown: 'reject.cooldown',
+  out_of_bounds: 'reject.out_of_bounds',
+  bad_color: 'reject.bad_color',
+  bad_request: 'reject.bad_request',
+  rate_limited: 'reject.rate_limited',
+  maintenance: 'reject.maintenance',
+  forbidden: 'reject.forbidden',
+  unchanged: 'reject.unchanged',
+  server_error: 'reject.server_error',
+};
+
 export default function App() {
+  const { t } = useT();
   const canvasRef = useRef<Uint8Array | null>(null);
   const [fullVersion, setFullVersion] = useState(0);
   const [patch, setPatch] = useState<Cell[]>([]);
@@ -55,7 +70,7 @@ export default function App() {
   const pushToast = useCallback((message: string, kind: Toast['kind'] = 'info') => {
     const id = Date.now() + Math.random();
     setToasts((prev) => [...prev.slice(-3), { id, kind, message }]);
-    window.setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), kind === 'error' ? 6500 : 3800);
+    window.setTimeout(() => setToasts((prev) => prev.filter((x) => x.id !== id)), kind === 'error' ? 6500 : 3800);
   }, []);
 
   const onCanvas = useCallback((canvas: Uint8Array) => {
@@ -106,9 +121,7 @@ export default function App() {
       } catch (error) {
         if (cancelled) return;
         const message =
-          error instanceof ApiError
-            ? error.message
-            : 'Could not reach the Pixel Commons server.';
+          error instanceof ApiError ? error.message : 'Could not reach the Pixel Commons server.';
         setBootstrap('failed');
         setBootError(message);
       }
@@ -127,8 +140,8 @@ export default function App() {
     if (!target) return;
     appliedShare.current = true;
     setFocusRequest({ x: target.x, y: target.y, nonce: Date.now() });
-    pushToast(`Opened at (${target.x}, ${target.y})`, 'info');
-  }, [ready, socket.config, pushToast]);
+    pushToast(t('app.openedAt', { x: target.x, y: target.y }), 'info');
+  }, [ready, socket.config, pushToast, t]);
 
   /* -------------------------------------------------------- cooldown state */
 
@@ -147,10 +160,15 @@ export default function App() {
   useEffect(() => {
     if (!socket.rejection || socket.rejection.at === lastRejection.current) return;
     lastRejection.current = socket.rejection.at;
-    const kind: Toast['kind'] =
-      socket.rejection.reason === 'rate_limited' || socket.rejection.reason === 'forbidden' ? 'error' : 'error';
-    pushToast(socket.rejection.message, kind);
-  }, [socket.rejection, pushToast]);
+    const reason = socket.rejection.reason;
+    const key = REJECT_KEYS[reason];
+    // Fall back to the server's own text only for reasons we do not have a
+    // translation for, so a new server-side rule never shows the wrong sentence.
+    const message = key
+      ? t(key, { seconds: Math.max(0, Math.ceil(((socket.rejection.nextAt ?? 0) - Date.now()) / 1000)) })
+      : socket.rejection.message;
+    pushToast(message, 'error');
+  }, [socket.rejection, pushToast, t]);
 
   /* -------------------------------------------------------------- placing */
 
@@ -162,26 +180,26 @@ export default function App() {
         return;
       }
       if (socket.state !== 'online') {
-        pushToast('You are offline — the pixel was not sent.', 'error');
+        pushToast(t('app.offlinePixel'), 'error');
         return;
       }
       if (!cooldownReady) {
-        pushToast(`Cooldown: ${Math.ceil((socket.nextAt - Date.now()) / 1000)}s left.`, 'info');
+        pushToast(t('app.cooldownLeft', { seconds: Math.ceil((socket.nextAt - Date.now()) / 1000) }), 'info');
         return;
       }
       socket.place(x, y, selectedColor);
     },
-    [cooldownReady, pushToast, selectedColor, socket],
+    [cooldownReady, pushToast, selectedColor, socket, t],
   );
 
   const handlePlaceAttempt = useCallback(() => {
     const target = hover ?? (focusRequest ? { x: focusRequest.x, y: focusRequest.y } : null);
     if (!target) {
-      pushToast('Tap a pixel on the canvas to place it.', 'info');
+      pushToast(t('app.tapPixel'), 'info');
       return;
     }
     place(target.x, target.y);
-  }, [focusRequest, hover, place, pushToast]);
+  }, [focusRequest, hover, place, pushToast, t]);
 
   /* ---------------------------------------------------------------- share */
 
@@ -195,11 +213,11 @@ export default function App() {
     const url = `${location.origin}${location.pathname}${params.toString() ? `?${params}` : ''}`;
     navigator.clipboard
       ?.writeText(url)
-      .then(() => pushToast('Share link copied — it opens centred on that pixel.', 'ok'))
+      .then(() => pushToast(t('app.shareCopied'), 'ok'))
       .catch(() => {
-        window.prompt('Copy this link:', url);
+        window.prompt(t('app.copyPrompt'), url);
       });
-  }, [hover, pushToast]);
+  }, [hover, pushToast, t]);
 
   /* ------------------------------------------------------------- dialogs */
 
@@ -245,14 +263,14 @@ export default function App() {
   if (bootError) {
     return (
       <div className="boot-error" data-testid="boot-error">
-        <h1>Pixel Commons could not start</h1>
+        <h1>{t('app.bootTitle')}</h1>
         <p>{bootError}</p>
         <p className="fineprint">
-          The real-time server lives at <code>{apiBase || location.origin}</code>. If you opened a static export, make
-          sure <code>VITE_API_BASE</code> points at the deployed Worker.
+          {t('app.bootHint1')} <code>{apiBase || location.origin}</code>. {t('app.bootHint2')}{' '}
+          <code>VITE_API_BASE</code> {t('app.bootHint3')}
         </p>
         <button type="button" className="primary-btn" onClick={() => location.reload()}>
-          retry
+          {t('app.retry')}
         </button>
       </div>
     );
@@ -276,11 +294,8 @@ export default function App() {
         <ConnectionBanner state={socket.state} attempts={socket.attempts} onRetry={socket.retryNow} />
         {socket.config?.storageHealthy === false && (
           <div className="notice warn" role="alert" data-testid="storage-banner">
-            <span className="notice-level">storage</span>
-            <span className="notice-text">
-              The canvas is running in memory only right now - pixels are visible to everyone but may not survive a
-              restart. History, snapshots and export are paused until storage recovers.
-            </span>
+            <span className="notice-level">{t('app.storageLevel')}</span>
+            <span className="notice-text">{t('app.storageText')}</span>
           </div>
         )}
         {socket.notice && <NoticeBanner notice={socket.notice} />}
@@ -300,8 +315,8 @@ export default function App() {
           {!socket.config || !ready ? (
             <div className="canvas-skeleton" data-testid="canvas-skeleton">
               <div className="spinner" aria-hidden="true" />
-              <p>Loading the shared canvas…</p>
-              <small>{socket.state === 'connecting' ? 'connecting to the realtime room' : socket.state}</small>
+              <p>{t('app.loadingCanvas')}</p>
+              <small>{socket.state === 'connecting' ? t('app.connectingRoom') : t(`state.${socket.state}`)}</small>
             </div>
           ) : null}
           {socket.config && (
@@ -332,15 +347,15 @@ export default function App() {
                   {hover ? `x ${hover.x} · y ${hover.y}` : `${socket.config.width}×${socket.config.height}`}
                 </span>
                 <button type="button" className="ghost-btn small" onClick={() => void shareLink()} data-testid="share-link">
-                  share
+                  {t('app.share')}
                 </button>
                 <button
                   type="button"
                   className="ghost-btn small"
-                  onClick={() => (hover ? setReportCell(hover) : pushToast('Hover or tap a pixel first.', 'info'))}
+                  onClick={() => (hover ? setReportCell(hover) : pushToast(t('app.hoverFirst'), 'info'))}
                   data-testid="report-open"
                 >
-                  report
+                  {t('app.report')}
                 </button>
               </div>
               <div className="mobile-tabs" role="tablist">
@@ -350,8 +365,9 @@ export default function App() {
                   aria-selected={mobilePanel === 'palette'}
                   className={mobilePanel === 'palette' ? 'active' : ''}
                   onClick={() => setMobilePanel((p) => (p === 'palette' ? null : 'palette'))}
+                  data-testid="tab-colours"
                 >
-                  colours
+                  {t('app.tabColours')}
                 </button>
                 <button
                   type="button"
@@ -359,8 +375,9 @@ export default function App() {
                   aria-selected={mobilePanel === 'activity'}
                   className={mobilePanel === 'activity' ? 'active' : ''}
                   onClick={() => setMobilePanel((p) => (p === 'activity' ? null : 'activity'))}
+                  data-testid="tab-activity"
                 >
-                  activity
+                  {t('app.tabActivity')}
                 </button>
               </div>
             </PixelCanvas>
@@ -377,28 +394,43 @@ export default function App() {
           />
           <section className="panel meta-panel">
             <div className="panel-head">
-              <h2>Your session</h2>
-              <span className="chip">{socket.session?.isAdmin ? 'admin' : 'anonymous'}</span>
+              <h2>{t('app.sessionTitle')}</h2>
+              <span className="chip">
+                {socket.session?.isAdmin ? t('app.sessionAdmin') : t('app.sessionAnon')}
+              </span>
             </div>
             <p className="fineprint">
-              handle <b className="mono" data-testid="handle">{socket.session?.handle ?? '—'}</b>
+              {t('app.handle')}{' '}
+              <b className="mono" data-testid="handle">
+                {socket.session?.handle ?? '—'}
+              </b>
               <br />
-              pixels placed <b>{socket.session?.pixels ?? 0}</b>
+              {t('app.pixelsPlaced')} <b>{socket.session?.pixels ?? 0}</b>
               <br />
-              cooldown <b>{(cooldownMs / 1000).toFixed(0)}s</b> per pixel
+              {t('app.cooldownPerPixel')} <b>{(cooldownMs / 1000).toFixed(0)}s</b> {t('app.perPixel')}
             </p>
             <button type="button" className="ghost-btn small" onClick={() => void socket.requestHistory()}>
-              refresh feed
+              {t('app.refreshFeed')}
             </button>
           </section>
         </aside>
       </main>
 
       {mobilePanel && (
-        <div className="mobile-sheet" role="dialog" aria-label={mobilePanel === 'palette' ? 'Colours' : 'Activity'}>
+        <div
+          className="mobile-sheet"
+          role="dialog"
+          aria-label={mobilePanel === 'palette' ? t('app.tabColours') : t('app.tabActivity')}
+        >
           <div className="modal-head">
-            <h2>{mobilePanel === 'palette' ? 'Colours' : 'Activity'}</h2>
-            <button type="button" className="ghost-btn" onClick={() => setMobilePanel(null)} aria-label="Close">
+            <h2>{mobilePanel === 'palette' ? t('app.tabColours') : t('app.tabActivity')}</h2>
+            <button
+              type="button"
+              className="ghost-btn"
+              onClick={() => setMobilePanel(null)}
+              aria-label={t('modal.close')}
+              data-testid="sheet-close"
+            >
               ×
             </button>
           </div>
@@ -429,8 +461,8 @@ export default function App() {
 
       <footer className="app-footer">
         <span>
-          Pixel Commons · MIT licensed ·{' '}
-          {isStaticBuild ? 'static build on GitHub Pages' : 'Cloudflare Worker + Durable Object'} · built by{' '}
+          Pixel Commons · {t('app.footerLicence')} ·{' '}
+          {isStaticBuild ? t('app.footerStatic') : t('app.footerWorker')} · {t('app.footerBuiltBy')}{' '}
           <a href="https://x.com/0xkillcoin" target="_blank" rel="noreferrer noopener">
             @0xkillcoin
           </a>
@@ -459,12 +491,12 @@ export default function App() {
           onSubmit={(reason, note) => {
             socket.report(reportCell.x, reportCell.y, reason, note);
             setReportCell(null);
-            pushToast('Report sent to the moderation queue.', 'ok');
+            pushToast(t('app.reportSent'), 'ok');
           }}
         />
       )}
 
-      <ToastStack toasts={toasts} onDismiss={(id) => setToasts((prev) => prev.filter((t) => t.id !== id))} />
+      <ToastStack toasts={toasts} onDismiss={(id) => setToasts((prev) => prev.filter((x) => x.id !== id))} />
     </div>
   );
 }

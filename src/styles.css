@@ -26,6 +26,9 @@
   --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.55);
   --shadow-sm: 0 4px 16px rgba(0, 0, 0, 0.35);
   --font: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  /* CJK fallbacks so Chinese text keeps proper metrics instead of borrowing Latin glyphs. */
+  --font-cjk: 'Inter', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', ui-sans-serif, system-ui,
+    sans-serif;
   --mono: ui-monospace, 'SF Mono', 'JetBrains Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
   --header-h: 62px;
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -55,6 +58,13 @@ body {
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior: none;
+}
+
+/* Apply the CJK stack only when the page is in Chinese, so Latin typography is
+   untouched in the default language. */
+html[lang='zh-Hans'] body {
+  font-family: var(--font-cjk);
+  letter-spacing: 0.01em;
 }
 
 button,
@@ -231,6 +241,52 @@ code,
 .icon-btn.active {
   color: var(--accent-4);
   border-color: rgba(255, 210, 63, 0.4);
+}
+
+/* Language switch: the glyph is the target language, so the affordance reads as
+   "switch to this", and the tooltip carries the full sentence. */
+.lang-btn {
+  border-color: var(--line-strong);
+  color: var(--text);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.lang-btn:hover,
+.lang-btn:focus-visible {
+  border-color: rgba(180, 195, 255, 0.55);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
+
+.lang-btn > .lang-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  width: 24px;
+  height: 18px;
+  border-radius: 5px;
+  background: rgba(41, 173, 255, 0.16);
+  color: var(--accent-2);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.lang-btn > .lang-glyph b {
+  font-style: normal;
+}
+
+.lang-btn > .lang-glyph i {
+  font-style: normal;
+  font-size: 10px;
+  opacity: 0.85;
+}
+
+/* Chinese glyphs need a slightly larger optical size to match Latin text. */
+html[lang='zh-Hans'] .lang-btn > .lang-glyph i {
+  font-size: 11px;
 }
 
 .x-link {
