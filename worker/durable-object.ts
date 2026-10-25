@@ -804,27 +804,45 @@ export class CanvasRoom implements DurableObject {
     const sql = this.state.storage.sql;
     const now = nowMs();
 
+    // The audit trail is required for accountability but must never be the reason an
+    // admin action fails: if storage refuses it, the action still runs and the failure
+    // is logged for operators.
     const audit = (action: string, detail: string) => {
-      sql.exec(
-        `INSERT INTO audit (action, detail, by, at) VALUES (?, ?, ?, ?)`,
-        action,
-        detail.slice(0, 500),
-        by,
-        now,
-      );
+      try {
+        sql.exec(
+          `INSERT INTO audit (action, detail, by, at) VALUES (?, ?, ?, ?)`,
+          action,
+          detail.slice(0, 500),
+          by,
+          now,
+        );
+      } catch (error) {
+        this.storageHealthy = false;
+        console.warn('audit_failed', action, error instanceof Error ? error.message : error);
+      }
     };
 
     switch (body.action) {
       case 'reset': {
-        sql.exec(`DELETE FROM history`);
-        sql.exec(`DELETE FROM snapshots`);
-        sql.exec(`DELETE FROM players`);
+        try {
+          sql.exec(`DELETE FROM history`);
+          sql.exec(`DELETE FROM snapshots`);
+          sql.exec(`DELETE FROM players`);
+          this.persistMeta();
+        } catch (error) {
+          this.storageHealthy = false;
+          console.warn('reset_persist_failed', error instanceof Error ? error.message : error);
+        }
         this.board.fill(0);
         this.totalPixels = 0;
         this.roomVersion += 1;
         this.lastSnapshotAt = 0;
-        this.persistBoard();
-        this.persistMeta();
+        try {
+          this.persistBoard();
+        } catch (error) {
+          this.storageHealthy = false;
+          console.warn('reset_board_failed', error instanceof Error ? error.message : error);
+        }
         audit('reset', 'canvas cleared');
         this.broadcastSystem({
           t: 'welcome',
@@ -843,31 +861,38 @@ export class CanvasRoom implements DurableObject {
       case 'notice': {
         const level = (body.status === 'warn' || body.status === 'maintenance' ? body.status : 'info') as Notice['level'];
         this.notice = { message: (body.value ?? '').slice(0, 280), level, since: now, updatedBy: by };
-        this.persistMeta();
+        this.safeMeta();
         audit('notice', `${level}: ${this.notice.message}`);
         this.broadcast({ t: 'notice', notice: this.notice });
         return { ok: true, message: 'Notice published.' };
       }
       case 'clearNotice': {
         this.notice = null;
-        this.persistMeta();
+        this.safeMeta();
         audit('clearNotice', 'notice cleared');
         this.broadcast({ t: 'notice', notice: null });
         return { ok: true, message: 'Notice cleared.' };
       }
       case 'undo': {
-        const last = sql
-          .exec<{ id: number; x: number; y: number; prev: number | null; at: number }>(
-            `SELECT id, x, y, prev, at FROM history ORDER BY id DESC LIMIT 1`,
-          )
-          .toArray()[0] ?? null;
+        const last = this.safeRead('undo-last', () =>
+          sql
+            .exec<{ id: number; x: number; y: number; prev: number | null; at: number }>(
+              `SELECT id, x, y, prev, at FROM history ORDER BY id DESC LIMIT 1`,
+            )
+            .toArray(),
+        )[0] ?? null;
         if (!last) return { ok: false, message: 'Nothing to undo.' };
         const idx = Number(last.y) * this.config.width + Number(last.x);
         this.board[idx] = last.prev === null ? 0 : Number(last.prev);
-        sql.exec(`DELETE FROM history WHERE id = ?`, Number(last.id));
+        try {
+          sql.exec(`DELETE FROM history WHERE id = ?`, Number(last.id));
+          this.persistBoard();
+          this.persistMeta();
+        } catch (error) {
+          this.storageHealthy = false;
+          console.warn('undo_persist_failed', error instanceof Error ? error.message : error);
+        }
         this.roomVersion += 1;
-        this.persistBoard();
-        this.persistMeta();
         audit('undo', `pixel (${last.x}, ${last.y})`);
         this.broadcast({ t: 'pixels', cells: [], lastId: this.lastHistoryId(), totalPixels: this.totalPixels, version: this.roomVersion });
         this.broadcastSystem({
@@ -888,7 +913,7 @@ export class CanvasRoom implements DurableObject {
         const name = (body.value ?? '').slice(0, 48).trim();
         if (!name) return { ok: false, message: 'Name cannot be empty.' };
         this.canvasName = name;
-        this.persistMeta();
+        this.safeMeta();
         audit('rename', name);
         this.broadcast({ t: 'notice', notice: this.notice });
         return { ok: true, message: `Canvas renamed to "${name}".` };
@@ -896,10 +921,16 @@ export class CanvasRoom implements DurableObject {
       case 'resolveReport': {
         const id = Number(body.id);
         const status = body.status === 'rejected' ? 'rejected' : 'resolved';
-        sql.exec(`UPDATE reports SET status = ? WHERE id = ?`, status, id);
-        this.openReports = Number(
-          sql.exec<{ n: number }>(`SELECT COUNT(*) AS n FROM reports WHERE status = 'open'`).toArray()[0]?.n ?? 0,
-        );
+        try {
+          sql.exec(`UPDATE reports SET status = ? WHERE id = ?`, status, id);
+          this.openReports = Number(
+            sql.exec<{ n: number }>(`SELECT COUNT(*) AS n FROM reports WHERE status = 'open'`).toArray()[0]?.n ?? 0,
+          );
+        } catch (error) {
+          this.storageHealthy = false;
+          console.warn('resolve_failed', error instanceof Error ? error.message : error);
+          return { ok: false, message: 'The moderation queue is unavailable right now, so the report was not updated.' };
+        }
         audit('resolveReport', `#${id} -> ${status}`);
         for (const other of this.connections.values()) {
           if (other.isAdmin) this.send(other, { t: 'presence', online: this.connections.size, players: [] });
@@ -919,21 +950,21 @@ export class CanvasRoom implements DurableObject {
     config: ServerConfig;
   }> {
     await this.load();
-    const sql = this.state.storage.sql;
-    const reports = sql
-      .exec<Report>(`SELECT id, x, y, reason, note, at, status, by FROM reports ORDER BY status = 'open' DESC, id DESC LIMIT 100`)
-      .toArray()
-      .map((r) => ({ ...r, at: Number(r.at), id: Number(r.id), x: Number(r.x), y: Number(r.y) }));
-    const audit = sql
-      .exec<AdminAction>(`SELECT id, action, detail, by, at FROM audit ORDER BY id DESC LIMIT 60`)
-      .toArray()
-      .map((a) => ({ ...a, id: Number(a.id), at: Number(a.at) }));
-    const snapshots = sql
-      .exec<{ id: number; at: number; version: number; total_pixels: number }>(
-        `SELECT id, at, version, total_pixels FROM snapshots ORDER BY id DESC LIMIT 40`,
-      )
-      .toArray()
-      .map((s) => ({ id: Number(s.id), at: Number(s.at), version: Number(s.version), totalPixels: Number(s.total_pixels) }));
+    const reports = this.safeRead('admin-reports', () =>
+      this.state.storage.sql
+        .exec<Report>(
+          `SELECT id, x, y, reason, note, at, status, by FROM reports ORDER BY status = 'open' DESC, id DESC LIMIT 100`,
+        )
+        .toArray()
+        .map((r) => ({ ...r, at: Number(r.at), id: Number(r.id), x: Number(r.x), y: Number(r.y) })),
+    );
+    const audit = this.safeRead('admin-audit', () =>
+      this.state.storage.sql
+        .exec<AdminAction>(`SELECT id, action, detail, by, at FROM audit ORDER BY id DESC LIMIT 60`)
+        .toArray()
+        .map((a) => ({ ...a, id: Number(a.id), at: Number(a.at) })),
+    );
+    const snapshots = await this.readSnapshotList();
     return { reports, audit, snapshots, config: this.publicConfig() };
   }
 
@@ -975,12 +1006,14 @@ export class CanvasRoom implements DurableObject {
 
   async readSnapshotList(): Promise<Array<{ id: number; at: number; version: number; totalPixels: number }>> {
     await this.load();
-    return this.state.storage.sql
-      .exec<{ id: number; at: number; version: number; total_pixels: number }>(
-        `SELECT id, at, version, total_pixels FROM snapshots ORDER BY id DESC LIMIT 40`,
-      )
-      .toArray()
-      .map((s) => ({ id: Number(s.id), at: Number(s.at), version: Number(s.version), totalPixels: Number(s.total_pixels) }));
+    return this.safeRead('snapshots', () =>
+      this.state.storage.sql
+        .exec<{ id: number; at: number; version: number; total_pixels: number }>(
+          `SELECT id, at, version, total_pixels FROM snapshots ORDER BY id DESC LIMIT 40`,
+        )
+        .toArray()
+        .map((s) => ({ id: Number(s.id), at: Number(s.at), version: Number(s.version), totalPixels: Number(s.total_pixels) })),
+    );
   }
 
   /** Create a backup blob (RLE) for scheduled exports to R2. */
@@ -1000,6 +1033,16 @@ export class CanvasRoom implements DurableObject {
    * pixel write costs exactly one row write (`persistBoard`) rather than five. On
    * the free tier that is the difference between ~100k and ~500k pixels per day.
    */
+  /** `persistMeta` for callers that must not fail because of storage trouble. */
+  private safeMeta(): void {
+    try {
+      this.persistMeta();
+    } catch (error) {
+      this.storageHealthy = false;
+      console.warn('meta_failed', error instanceof Error ? error.message : error);
+    }
+  }
+
   private persistMeta(): void {
     const sql = this.state.storage.sql;
     const write = (key: string, value: string) =>

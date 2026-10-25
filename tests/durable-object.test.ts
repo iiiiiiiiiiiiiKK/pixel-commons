@@ -408,4 +408,29 @@ describe('CanvasRoom: storage degradation', () => {
     a.receive({ t: 'place', x: 2, y: 2, c: 4, nonce: 'n2' });
     expect(a.messages().find((m) => m.t === 'reject')?.reason).toBe('cooldown');
   });
+
+  it('admin actions still take effect and answer, with storage down', async () => {
+    const failingSql = {
+      exec() {
+        throw new Error('storage offline');
+      },
+    };
+    const room = new CanvasRoom(
+      {
+        storage: { sql: failingSql },
+        blockConcurrencyWhile: async (fn: () => Promise<void>) => fn(),
+      } as unknown as DurableObjectState,
+      fakeEnv(),
+    );
+
+    // Publishing a notice is in-memory state, so it must succeed and reach clients.
+    const notice = await room.adminAction({ action: 'notice', value: 'Heads up', status: 'warn', by: 'admin' });
+    expect(notice.ok).toBe(true);
+
+    // The admin view must answer with arrays, never throw.
+    const view = await room.adminView();
+    expect(Array.isArray(view.reports)).toBe(true);
+    expect(Array.isArray(view.audit)).toBe(true);
+    expect(view.config.storageHealthy).toBe(false);
+  });
 });

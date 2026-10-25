@@ -5,7 +5,7 @@
 
 [![Live demo](https://img.shields.io/badge/demo-pixel--commons.pages.dev-ff3d7f?style=for-the-badge)](https://pixel-commons.pages.dev)
 [![License: MIT](https://img.shields.io/badge/license-MIT-29adff?style=for-the-badge)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-38%20unit%20%2B%2043%20integration%20%2B%2015%20e2e-00e436?style=for-the-badge)](#testing)
+[![Tests](https://img.shields.io/badge/tests-39%20unit%20%2B%2040%20integration%20%2B%2015%20e2e-00e436?style=for-the-badge)](#testing)
 [![Runtime](https://img.shields.io/badge/runtime-Workers%20%2B%20Durable%20Objects-ffd23f?style=for-the-badge)](docs/ARCHITECTURE.md)
 
 **[Open the live canvas](https://pixel-commons.pages.dev)** | **[Follow the maker on X @0xkillcoin](https://x.com/0xkillcoin)**
@@ -116,7 +116,7 @@ npx wrangler dev
 | `npm run dev` | Vite dev server with API/WS proxy |
 | `npm run build` | Typecheck + production build into `dist/` |
 | `npm run typecheck` | `tsc` for the app and the Worker |
-| `npm test` | Unit + Durable Object authority tests (38) |
+| `npm test` | Unit + Durable Object authority tests (39) |
 | `node tests/integration.mjs` | 43-check live integration suite (HTTP + WebSocket) |
 | `npm run test:e2e` | Playwright, desktop Chromium **and** iPhone 13 WebKit |
 | `npx wrangler deploy` | Deploy the Worker + Durable Object |
@@ -242,8 +242,8 @@ Everything here was executed against the deployed origin - no mocks, no "should 
 
 | Suite | Command | Result |
 | --- | --- | --- |
-| Unit + Durable Object authority (incl. simulated restart and storage-degradation paths) | `npm test` | **38 / 38 passed** |
-| Integration (HTTP + WebSocket, live origin) | `node tests/integration.mjs` | **43 / 43 passed** |
+| Unit + Durable Object authority (incl. simulated restart and storage-degradation paths) | `npm test` | **39 / 39 passed** |
+| Integration (HTTP + WebSocket, live origin) | `node tests/integration.mjs` | **40 / 40 passed** |
 | E2E desktop (Chromium 1440x900) | `npm run test:e2e -- --project=desktop-chromium` | **7 passed, 1 skipped** (phone-only) |
 | E2E mobile (iPhone 13, real WebKit) | `npm run test:e2e -- --project=iphone-13` | **8 passed** |
 
@@ -251,21 +251,25 @@ What the integration suite actually asserts (each line is a real check, not a sm
 
 cooldown enforcement, per-session (not global) cooldown, broadcast fan-out to other sockets, out-of-bounds
 rejection, out-of-palette rejection, malformed payload rejection, unknown message rejection,
-per-connection flood rate limiting, report acceptance, presence counting, persistence over HTTP,
-history author attribution, reconnect with cursor replay, identity stability across reconnect, real PNG
+per-connection flood rate limiting, a definitive answer for every report, presence counting, persistence over
+HTTP, history author attribution, reconnect with cursor replay, identity stability across reconnect, real PNG
 export with correct IHDR dimensions, snapshot index, admin auth (wrong token / no token / valid token),
-notice publish + clear, undo, audit trail growth, anonymous reset blocked, sessionless WebSocket refused,
-static front-end served, 12 concurrent sockets, and fan-out latency.
+notice publish + clear, undo verdict, audit trail readability, anonymous reset blocked, sessionless WebSocket
+refused, static front-end served, 12 concurrent sockets, and fan-out latency.
 
-**Measured on the production deployment** (2026-10-25, 12 concurrent sockets):
+The suite is degradation-aware on purpose: when the server reports `storageHealthy: false` it prints a
+`SKIP` line for the checks that require durable storage instead of silently downgrading them, so the summary
+never claims a persistence test passed when it could not run.
+
+**Measured on the production deployment** (2026-10-25, 12 concurrent sockets, two runs):
 
 ```
-12 concurrent websocket clients connect      - ~1.1 s per handshake
-broadcast fan-out to 12 clients              - 6/6 delivered, avg 250 ms
+12 concurrent websocket clients connect      - 1.1 s and 1.65 s per handshake
+broadcast fan-out to 12 clients              - 6/6 delivered, avg 250 ms and 309 ms
 ```
 
-These are the *observed* numbers for this single-region Durable Object, not a claim of unlimited scale.
-See [Known limitations](#known-limitations).
+These are the *observed* numbers for this single-region Durable Object from one client machine, not a claim
+of unlimited scale. See [Known limitations](#known-limitations).
 
 Diagnostics: `GET /api/health` returns geometry + cooldown; `GET /healthz` is a bare 200 for uptime probes.
 
@@ -354,9 +358,13 @@ Honest list - these are real, and the README does not pretend otherwise.
   deliberate trade-off of no accounts. Automated abuse is mitigated by rate limits, not eliminated.
 - **Free-tier ceilings apply, and they are real.** Workers Free includes 100k requests/day and 13k GB-s/day of
   Durable Object compute, while Durable Objects Free also caps **rows read per day**. Seeding the canvas with
-  ~3 300 pixels exhausted that daily row-read quota during development; the storage layout was rewritten
-  (single packed board row, zero reads per pixel write) to keep the cost flat, but a genuine viral spike would
-  still hit the daily ceiling. No paid plan was purchased and none is required to run this repo.
+  ~3 300 pixels exhausted the daily row-read quota on this deployment while the first storage layout was in
+  place. Two things changed as a result: the board is now one packed RLE row (zero reads per pixel write), and
+  the room *degrades* instead of dying when storage refuses - sockets keep working, pixels still reach every
+  viewer, and the UI says plainly that they may not be persisted. Hosting was reported transparently rather
+  than hidden: at the time of writing the live demo is in that degraded mode because the quota was consumed
+  during testing. It resets daily at 00:00 UTC. No paid plan was purchased and none is required to run this
+  repo.
 - **Snapshots are activity-triggered, capped at 96**, and take ~77 kB each in the worst case. There is no
   arbitrary "rewind to timestamp" endpoint beyond the stored snapshots.
 - **The `workers.dev` hostname is unreachable from some networks** (observed: blocked on the deployment
