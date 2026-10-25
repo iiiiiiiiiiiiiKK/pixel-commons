@@ -32,5 +32,9 @@
     "CANVAS_HEIGHT": "256",
     "CANVAS_NAME": "Pixel Commons",
     "COOLDOWN_SECONDS": "30",
+    // Only needed by the static GitHub Pages build, which calls this API
+    // cross-origin. Same-origin deployments need nothing here. Note the
+    // lower-case host: GitHub renders the owner name in lower case.
+    "ALLOWED_ORIGINS": "https://iiiiiiiiiiiiikk.github.io,http://localhost:5173,http://127.0.0.1:8787"
   }
 }

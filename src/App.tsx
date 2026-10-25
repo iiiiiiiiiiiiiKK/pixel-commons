@@ -82,7 +82,14 @@ export default function App() {
     setFullVersion((v) => v + 1);
   }, []);
 
-  const socket = useCanvasSocket({ onCanvas, onPixels, onReset });
+  /**
+   * The socket is only opened after `/api/session` succeeds. In the same-origin build
+   * that is a formality; in the static cross-origin build the token returned by that
+   * request is the only way to authenticate the WebSocket handshake, so waiting for it
+   * avoids a guaranteed failed connection on first load.
+   */
+  const [bootstrap, setBootstrap] = useState<'pending' | 'ready' | 'failed'>('pending');
+  const socket = useCanvasSocket({ onCanvas, onPixels, onReset, enabled: bootstrap === 'ready' });
   const configRef = useRef<ServerConfig | null>(null);
   configRef.current = socket.config;
 
@@ -95,12 +102,14 @@ export default function App() {
         const session = await api.session();
         if (cancelled) return;
         setAdminEnabled(session.adminEnabled);
+        setBootstrap('ready');
       } catch (error) {
         if (cancelled) return;
         const message =
           error instanceof ApiError
             ? error.message
             : 'Could not reach the Pixel Commons server.';
+        setBootstrap('failed');
         setBootError(message);
       }
     })();

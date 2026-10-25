@@ -58,10 +58,45 @@ export type SessionInfo = {
   cooldownMs: number;
   canvas: { width: number; height: number };
   recent: unknown[];
+  /**
+   * Only present for trusted cross-origin builds (GitHub Pages). Browsers block
+   * third-party cookies, so the signed session token travels in the WebSocket URL
+   * instead. It is the same HMAC value the cookie would hold.
+   */
+  token?: string;
+  crossSite?: boolean;
 };
 
+/**
+ * Session token for cross-origin builds, kept in `sessionStorage`:
+ * tab-scoped, cleared when the tab closes, never exposed to another origin.
+ */
+const TOKEN_KEY = 'pc.session.token';
+
+export function readSessionToken(): string | null {
+  if (!isStaticBuild) return null;
+  try {
+    return sessionStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function storeSessionToken(token: string | undefined): void {
+  if (!isStaticBuild || !token) return;
+  try {
+    sessionStorage.setItem(TOKEN_KEY, token);
+  } catch {
+    /* private browsing may refuse storage; the socket then falls back to cookies */
+  }
+}
+
 export const api = {
-  session: () => request<SessionInfo>('/api/session'),
+  session: async () => {
+    const info = await request<SessionInfo>('/api/session');
+    storeSessionToken(info.token);
+    return info;
+  },
   history: (since = 0, limit = 60) =>
     request<{ history: Array<{ id: number; x: number; y: number; c: number; prev: number | null; at: number; by: string }>; lastId: number }>(
       `/api/history?since=${since}&limit=${limit}`,

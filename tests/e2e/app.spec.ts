@@ -6,8 +6,7 @@ import { join } from 'node:path';
  * End-to-end checks in a real browser: layout, touch/mouse interaction,
  * cooldown feedback, two-browser collaboration, reconnection and export.
  *
- * The suite runs twice — desktop Chromium and a real WebKit iPhone 13 profile —
- * so responsive and touch behaviour is verified instead of assumed.
+ * The suite runs twice 閳?desktop Chromium and a real WebKit iPhone 13 profile 閳? * so responsive and touch behaviour is verified instead of assumed.
  */
 
 const SHOT_DIR = join(process.cwd(), 'docs', 'screenshots');
@@ -62,9 +61,18 @@ async function placeAtCentre(page: Page, testInfo: TestInfo) {
   await page.waitForTimeout(1500);
 }
 
+/**
+ * Absolute URL of the API that this deployment talks to.
+ *
+ * Same-origin deployments answer on `/api`, the static GitHub Pages build points at a
+ * remote Worker, so the helper has to respect the bundle's configured base rather than
+ * assume a relative path.
+ */
+const API_ORIGIN = process.env.PIXEL_COMMONS_API || '';
+
 /** Read the authoritative colour of a cell straight from the API. */
 async function cellColour(page: Page, x: number, y: number): Promise<number | null> {
-  const res = await page.request.get('/api/history?since=0&limit=200');
+  const res = await page.request.get(`${API_ORIGIN}/api/history?since=0&limit=200`);
   const body = (await res.json()) as { history: Array<{ x: number; y: number; c: number }> };
   const hit = body.history.find((h) => h.x === x && h.y === y);
   return hit ? hit.c : null;
@@ -72,7 +80,7 @@ async function cellColour(page: Page, x: number, y: number): Promise<number | nu
 
 test.describe('Pixel Commons', () => {
   test('loads the canvas, palette, activity panel and X link', async ({ page }, testInfo) => {
-    await page.goto('/');
+    await page.goto('./');
     await waitForCanvas(page);
 
     await openPalette(page, testInfo);
@@ -107,7 +115,7 @@ test.describe('Pixel Commons', () => {
   test('places a pixel through the canvas and receives the server confirmation', async ({ page }, testInfo) => {
     const x = 150 + Math.floor(Math.random() * 60);
     const y = 150 + Math.floor(Math.random() * 60);
-    await page.goto(`/?x=${x}&y=${y}&z=14`);
+    await page.goto(`./?x=${x}&y=${y}&z=14`);
     await waitForCanvas(page);
     await page.waitForTimeout(600);
 
@@ -138,13 +146,13 @@ test.describe('Pixel Commons', () => {
   });
 
   test('cooldown CTA reflects the server deadline', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('./');
     await waitForCanvas(page);
 
     const cta = page.getByTestId('place-cta');
     await expect(cta).toBeVisible();
     const text = ((await cta.textContent()) ?? '').replace(/\s+/g, '');
-    // Either "Ready" or a countdown such as "29.4s" — never a client-invented value.
+    // Either "Ready" or a countdown such as "29.4s" 閳?never a client-invented value.
     expect(/ready|\d+(\.\d+)?s/i.test(text)).toBeTruthy();
 
     // The progress bar is bound to the same deadline.
@@ -152,14 +160,14 @@ test.describe('Pixel Commons', () => {
   });
 
   test('history dialog exposes server-rendered export links', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('./');
     await waitForCanvas(page);
     await page.getByTitle('History & snapshots').click();
     await expect(page.getByTestId('export-1x')).toHaveAttribute('href', /\/api\/export\.png\?scale=1/);
     await expect(page.getByTestId('export-4x')).toHaveAttribute('href', /scale=4/);
 
     // The export must be a real PNG produced by the backend.
-    const res = await page.request.get('/api/export.png?scale=1');
+    const res = await page.request.get(`${API_ORIGIN}/api/export.png?scale=1`);
     expect(res.status()).toBe(200);
     expect(res.headers()['content-type']).toContain('image/png');
     const buffer = await res.body();
@@ -169,7 +177,7 @@ test.describe('Pixel Commons', () => {
   });
 
   test('help dialog documents rules and controls', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('./');
     await waitForCanvas(page);
     await page.getByTitle('Rules & help').click();
     await expect(page.getByRole('heading', { name: /How Pixel Commons works/i })).toBeVisible();
@@ -183,9 +191,9 @@ test.describe('Pixel Commons', () => {
     const a = await contextA.newPage();
     const b = await contextB.newPage();
 
-    await a.goto('/');
+    await a.goto('./');
     await waitForCanvas(a);
-    await b.goto('/');
+    await b.goto('./');
     await waitForCanvas(b);
     await b.waitForTimeout(1500);
 
@@ -208,7 +216,7 @@ test.describe('Pixel Commons', () => {
   });
 
   test('reconnects automatically after the network drops', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('./');
     await waitForCanvas(page);
 
     await page.context().setOffline(true);
@@ -222,7 +230,7 @@ test.describe('Pixel Commons', () => {
   test('phone layout keeps the canvas usable and controls reachable', async ({ page }, testInfo) => {
     test.skip(!isMobile(testInfo), 'iPhone-only layout assertions');
 
-    await page.goto('/');
+    await page.goto('./');
     await waitForCanvas(page);
 
     // Colours are reachable through the floating sheet, and picking one closes it

@@ -8,7 +8,7 @@
 [![Tests](https://img.shields.io/badge/tests-39%20unit%20%2B%2040%20integration%20%2B%2015%20e2e-00e436?style=for-the-badge)](#testing)
 [![Runtime](https://img.shields.io/badge/runtime-Workers%20%2B%20Durable%20Objects-ffd23f?style=for-the-badge)](docs/ARCHITECTURE.md)
 
-**[Open the live canvas](https://pixel-commons.pages.dev)** | **[Follow the maker on X @0xkillcoin](https://x.com/0xkillcoin)**
+**[Open the live canvas](https://pixel-commons.pages.dev)** | **[Static demo on GitHub Pages](https://iiiiiiiiiiiiikk.github.io/pixel-commons/)** | **[Follow the maker on X @0xkillcoin](https://x.com/0xkillcoin)**
 
 ---
 
@@ -223,16 +223,24 @@ GitHub Pages variant and the WebSocket limitation behind it: [`docs/DEPLOYMENT.m
 ### Deploying the front-end to GitHub Pages
 
 GitHub Pages is static-only, so it **cannot** host the realtime backend. Pixel Commons therefore ships a
-static build that points at the Worker:
+static build that points at the Worker - and that build is live:
+**[iiiiiiiiiiiiikk.github.io/pixel-commons](https://iiiiiiiiiiiiikk.github.io/pixel-commons/)**.
 
 ```bash
 VITE_API_BASE=https://pixel-commons.pages.dev VITE_BASE=/pixel-commons/ \
   npx vite build --outDir dist-pages
-# publish dist-pages/ to the gh-pages branch
+node scripts/publish-gh-pages.mjs --repo <owner>/pixel-commons   # pushes dist-pages/ to gh-pages
 ```
 
-The API then sees a cross-site request, so it switches to `SameSite=None; Secure` cookies and only accepts
-the origins listed in `ALLOWED_ORIGINS`. See the deployment guide for the exact steps and caveats.
+Cross-origin hosting needs two extra pieces, both implemented and verified:
+
+1. **CORS** - the API only answers origins listed in `ALLOWED_ORIGINS`, with credentials allowed.
+2. **Session without third-party cookies** - browsers block `pc_sid` on a cross-site request, so
+   `GET /api/session` also returns the same HMAC-signed session value as a `token`. The static build keeps it
+   in `sessionStorage` (tab-scoped) and passes it to the WebSocket as `?token=...`. The server verifies the
+   HMAC either way, so a client can present a session but can never mint or modify one.
+
+See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for the exact steps and the caveats.
 
 ---
 
@@ -245,7 +253,7 @@ Everything here was executed against the deployed origin - no mocks, no "should 
 | Unit + Durable Object authority (incl. simulated restart and storage-degradation paths) | `npm test` | **39 / 39 passed** |
 | Integration (HTTP + WebSocket, live origin) | `node tests/integration.mjs` | **40 / 40 passed** |
 | E2E desktop (Chromium 1440x900) | `npm run test:e2e -- --project=desktop-chromium` | **7 passed, 1 skipped** (phone-only) |
-| E2E mobile (iPhone 13, real WebKit) | `npm run test:e2e -- --project=iphone-13` | **8 passed** |
+| E2E mobile (iPhone 13, real WebKit) | `npm run test:e2e -- --project=iphone-13` | **7 passed + 1 on retry** |
 
 What the integration suite actually asserts (each line is a real check, not a smoke test):
 

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { readSessionToken } from './api';
 import type {
   Cell,
   HistoryEntry,
@@ -16,7 +17,10 @@ function wsUrl(since: number): string {
     const url = new URL(API_BASE);
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
     url.pathname = '/ws';
-    url.search = `?since=${since}`;
+    // Browsers block third-party cookies, so the static cross-origin build passes the
+    // signed session token explicitly. The server verifies the HMAC either way.
+    const token = readSessionToken();
+    url.search = token ? `?since=${since}&token=${encodeURIComponent(token)}` : `?since=${since}`;
     return url.toString();
   }
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -44,6 +48,13 @@ type UseCanvasOptions = {
   onCanvas: (canvas: Uint8Array, config: ServerConfig) => void;
   onPixels: (cells: Cell[]) => void;
   onReset: (canvas: Uint8Array) => void;
+  /**
+   * Gates the first connection. The static cross-origin build must finish
+   * `/api/session` before opening a socket, because the session token it returns is
+   * the only way to authenticate there (third-party cookies are blocked). Waiting for
+   * an explicit signal removes that race instead of polling for it.
+   */
+  enabled?: boolean;
 };
 
 export type CanvasSocket = {
@@ -71,7 +82,9 @@ export type CanvasSocket = {
  * message dispatch and the derived state the UI renders.
  */
 export function useCanvasSocket(options: UseCanvasOptions): CanvasSocket {
-  const { onCanvas, onPixels, onReset } = options;
+  const { onCanvas, onPixels, onReset, enabled = true } = options;
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
 
   const [state, setState] = useState<ConnectionState>('connecting');
   const [config, setConfig] = useState<ServerConfig | null>(null);
@@ -206,6 +219,14 @@ export function useCanvasSocket(options: UseCanvasOptions): CanvasSocket {
   const connect = useCallback(() => {
     if (socketRef.current && socketRef.current.readyState <= WebSocket.OPEN) return;
 
+    // Wait for the caller to say "the session is ready". In the same-origin build that
+    // is immediate; in the static cross-origin build it happens after /api/session,
+    // because the token it returns is required by the handshake.
+    if (!enabledRef.current) {
+      setState('connecting');
+      return;
+    }
+
     setState((prev) => (prev === 'online' ? 'reconnecting' : attemptsRef.current === 0 ? 'connecting' : 'reconnecting'));
 
     let socket: WebSocket;
@@ -253,7 +274,7 @@ export function useCanvasSocket(options: UseCanvasOptions): CanvasSocket {
       // reconnect may already have installed a newer one.
       if (socketRef.current === socket) socketRef.current = null;
       if (manualClose.current) return;
-      // 4xxx codes come from the Worker layer (e.g. 4401 unauthenticated) — retrying
+      // 4xxx codes come from the Worker layer (e.g. 4401 unauthenticated) 鈥?retrying
       // blindly would loop, so surface a fatal state and let the user reload.
       if (event.code >= 4400 && event.code < 4500) {
         setState('fatal');
@@ -319,10 +340,19 @@ export function useCanvasSocket(options: UseCanvasOptions): CanvasSocket {
     };
   }, [connect, forceReconnect]);
 
+  // Open the socket as soon as the caller reports the session is ready (and reopen it
+  // if that flips back for any reason). This is what removes the startup race in the
+  // cross-origin build without adding timers.
+  useEffect(() => {
+    if (!enabled) return;
+    if (socketRef.current) return;
+    connect();
+  }, [enabled, connect]);
+
   const place = useCallback((x: number, y: number, c: number) => {
     const socket = socketRef.current;
     if (!socket || socket.readyState !== WebSocket.OPEN) {
-      setRejection({ reason: 'server_error', message: 'You are offline — the pixel was not sent.', at: Date.now() });
+      setRejection({ reason: 'server_error', message: 'You are offline 鈥?the pixel was not sent.', at: Date.now() });
       return false;
     }
     const nonce = Math.random().toString(36).slice(2, 10);
@@ -334,7 +364,7 @@ export function useCanvasSocket(options: UseCanvasOptions): CanvasSocket {
   const report = useCallback((x: number, y: number, reason: string, note = '') => {
     const socket = socketRef.current;
     if (!socket || socket.readyState !== WebSocket.OPEN) {
-      setRejection({ reason: 'server_error', message: 'You are offline — the report was not sent.', at: Date.now() });
+      setRejection({ reason: 'server_error', message: 'You are offline 鈥?the report was not sent.', at: Date.now() });
       return;
     }
     socket.send(JSON.stringify({ t: 'report', x, y, reason, note }));

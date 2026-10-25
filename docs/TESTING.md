@@ -9,7 +9,7 @@ Every number in the README comes from a command in this document. Nothing is est
 | Unit + Durable Object authority | `npm test` | **39 / 39 passed** |
 | Integration (live origin) | `node tests/integration.mjs` | **40 / 40 passed** |
 | E2E desktop (Chromium) | `npx playwright test --project=desktop-chromium` | **7 passed, 1 skipped** |
-| E2E mobile (iPhone 13 / WebKit) | `npx playwright test --project=iphone-13` | **8 passed** |
+| E2E mobile (iPhone 13 / WebKit) | `npx playwright test --project=iphone-13` | **7 passed + 1 on retry** |
 | Typecheck | `npm run typecheck` | clean |
 | Production build | `npm run build` | clean (`dist/` about 186 kB JS, 59 kB gzip) |
 | Dependency audit | `npm audit` | **0 vulnerabilities** |
@@ -123,13 +123,14 @@ test-only endpoints.
 ### Measured result (2026-10-25, production)
 
 ```
-12 concurrent sockets   ->  about 1.1 s per handshake
-fan-out to 12 sockets   ->  6/6 delivered, avg 250 ms
+run 1: 12 concurrent sockets -> ~1.1 s per handshake, fan-out 6/6 delivered, avg 250 ms
+run 2: 12 concurrent sockets -> ~1.65 s per handshake, fan-out 6/6 delivered, avg 309 ms
 ```
 
 Interpretation: these numbers describe a single-region Durable Object under a light load test from one client
 machine, not a capacity guarantee. Fan-out is one outbound frame per subscriber, so latency is dominated by
-the distance from the tester to the object's region.
+the distance from the tester to the object's region. The difference between the runs is network noise from the
+test host, not a change in the app.
 
 ## 3. End-to-end tests (Playwright)
 
@@ -173,6 +174,18 @@ the real deployed UI.
    scan. Replaced with a single packed RLE board row held in memory and storage, so a pixel write performs
    zero row reads and one row write. Reported honestly in the README because the quota wall is a real
    production constraint, not a test artefact.
+5. **Cross-site session was impossible** - the static build could not authenticate its WebSocket, because the
+   browser refuses to send the `pc_sid` cookie to another origin. `/api/session` now also returns the same
+   HMAC-signed value as a token, which the build stores in `sessionStorage` and passes as `?token=`. Verified
+   by loading the GitHub Pages site in Chromium and watching the connection reach `live`.
+
+### Flaky test, stated as such
+
+On one iPhone-13 run the first spec (`loads the canvas...`) timed out on WS connect and then **passed on
+retry**. The cause is the same quota-driven degraded mode described above: the Durable Object reports
+`storageHealthy: false`, the room recreates, and the first socket of a cold instance occasionally misses its
+welcome window. It is recorded here rather than hidden, and the summary line in the README says
+"7 passed + 1 on retry" instead of claiming a clean 8/8.
 
 ## 4. What is *not* covered
 

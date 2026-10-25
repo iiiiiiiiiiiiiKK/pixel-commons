@@ -1,5 +1,15 @@
-import type { Env } from './env';
-import { adminCookie, clearAdminCookie, handleFor, resolveSession, safeEqual, sessionCookie, signAdmin, signedSessionValue } from './session';
+﻿import type { Env } from './env';
+import {
+  adminCookie,
+  clearAdminCookie,
+  handleFor,
+  resolveSession,
+  safeEqual,
+  sessionCookie,
+  signAdmin,
+  signedSessionValue,
+  verifySessionToken,
+} from './session';
 import { readConfig } from './durable-object';
 
 /* -------------------------------------------------------------------------- */
@@ -162,6 +172,7 @@ async function handleApi(request: Request, env: AppEnv, url: URL): Promise<Respo
       recent: unknown;
     };
     const cors = corsHeaders(request, env) ?? {};
+    const crossSite = isCrossSite(request);
     return jsonResponse(
       {
         handle: await handleFor(sessionId),
@@ -175,6 +186,11 @@ async function handleApi(request: Request, env: AppEnv, url: URL): Promise<Respo
           name: data.config?.canvasName,
         },
         recent: data.recent ?? [],
+        // Only handed out to browser origins we explicitly trust. It is the same
+        // HMAC-signed value the cookie holds, so a third party cannot forge it.
+        ...(crossSite
+          ? { token: await signedSessionValue(env.SESSION_SECRET, sessionId), crossSite: true }
+          : {}),
       },
       200,
       request,
@@ -185,10 +201,16 @@ async function handleApi(request: Request, env: AppEnv, url: URL): Promise<Respo
 
   /* --------------------------------- ws ---------------------------------- */
   if (path === '/ws') {
-    const { sessionId, issueCookie, isAdmin } = await resolveSession(request, env.SESSION_SECRET);
-    if (issueCookie) {
+    // Cross-origin builds (GitHub Pages) cannot rely on a third-party cookie, so they
+    // pass the signed session token in the query string instead. Both paths end in the
+    // same HMAC verification.
+    const tokenSession = await verifySessionToken(env.SESSION_SECRET, url.searchParams.get('token'));
+    const resolved = await resolveSession(request, env.SESSION_SECRET);
+    const sessionId = tokenSession ?? (resolved.issueCookie ? null : resolved.sessionId);
+    const isAdmin = resolved.isAdmin;
+    if (!sessionId) {
       return jsonResponse(
-        { error: 'no_session', message: 'Load /api/session first so the server can set a session cookie.' },
+        { error: 'no_session', message: 'Load /api/session first so the server can issue a session.' },
         401,
         request,
         env,

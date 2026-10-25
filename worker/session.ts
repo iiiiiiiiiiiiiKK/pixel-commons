@@ -166,6 +166,24 @@ export async function signedSessionValue(secret: string, sessionId: string): Pro
   return `${sessionId}.${await sign(secret, sessionId)}`;
 }
 
+/**
+ * Verify a session token supplied out-of-band (`?token=id.sig`).
+ *
+ * Browsers block third-party cookies, so the static cross-origin build cannot rely on
+ * the `pc_sid` cookie surviving from the API origin. The token is the same signed
+ * value the cookie would carry, so the server still verifies an HMAC: a client can
+ * present a session, but it cannot mint or modify one.
+ */
+export async function verifySessionToken(
+  secret: string,
+  token: string | null,
+): Promise<string | null> {
+  if (!token || !token.includes('.')) return null;
+  const [id, sig] = token.split('.') as [string, string];
+  if (!/^[A-Za-z0-9_-]{16,64}$/.test(id) || !sig) return null;
+  return (await verify(secret, id, sig)) ? id : null;
+}
+
 export async function signAdmin(secret: string): Promise<string> {
   return sign(secret, 'admin');
 }
