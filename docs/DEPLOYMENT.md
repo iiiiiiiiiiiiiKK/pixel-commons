@@ -156,28 +156,34 @@ VITE_BASE=/pixel-commons/ \
 
 ### 4.3 Publish
 
+The repository ships a script for this, because it works even on networks where `git push` to github.com is
+blocked (it publishes through the REST API):
+
 ```bash
-cd dist-pages
-git init && git add -A && git commit -m "docs: publish static demo"
-git branch -M gh-pages
-git remote add origin https://github.com/<user>/pixel-commons.git
-git push -f origin gh-pages
+VITE_API_BASE=https://pixel-commons.pages.dev VITE_BASE=/pixel-commons/ \
+  npx vite build --outDir dist-pages --emptyOutDir
+cp dist-pages/index.html dist-pages/404.html      # SPA fallback
+touch dist-pages/.nojekyll                        # stop Jekyll from filtering assets
+
+GITHUB_TOKEN=... node scripts/publish-gh-pages.mjs --repo <owner>/pixel-commons
 ```
 
-Then **Settings → Pages → Source: branch `gh-pages` / root**.
+Then **Settings → Pages → Source: branch `gh-pages` / root** (or `POST /repos/:owner/:repo/pages`). The live
+example site is <https://iiiiiiiiiiiiikk.github.io/pixel-commons/>.
 
-The repo also ships `.github/workflows/pages.yml`, which does exactly this on every push to `main` whenever
-`PAGES_API_BASE` is set as a repository variable.
+`.github/workflows/deploy.yml` can do the same on demand once `PAGES_API_BASE` is set as a repository variable.
 
 ### 4.4 Caveats (specific and real)
 
-- GitHub Pages has **no server runtime**. No cooldown enforcement, no history, no admin — those live in the
+- GitHub Pages has **no server runtime**. No cooldown enforcement, no history, no admin - those live in the
   Worker. If the Worker is down, the Pages build shows a clear "backend unreachable" error instead of pretending.
-- Cross-site cookies require the browser to accept third-party cookies for `github.io`. Safari's ITP can block
-  them, which means a *new* anonymous session per page load (the UI still works, your cooldown may reset more
-  often). This is a browser policy limit, not something the app can override.
-- The service worker / SPA fallback is handled by a `404.html` copy in the workflow, since GH Pages has no
-  rewrite rules.
+- **Third-party cookies are blocked by modern browsers**, so `pc_sid` will not survive from `pages.dev` to
+  `github.io`. The API therefore also returns the same HMAC-signed session value as a `token`, which the
+  static build keeps in `sessionStorage` and passes to the WebSocket as `?token=...`. The HMAC is still
+  verified server-side, so this is not a weakening - it is the same credential delivered on a channel the
+  browser permits. Older builds that relied on cookies alone silently failed to connect; that was found and
+  fixed during verification.
+- The SPA fallback is a `404.html` copy, since GH Pages has no rewrite rules.
 
 ---
 
@@ -189,12 +195,14 @@ Run these against whichever origin you deployed:
 export PIXEL_COMMONS_URL=https://pixel-commons.pages.dev
 
 curl -s $PIXEL_COMMONS_URL/api/health
-node tests/integration.mjs            # 43 checks, HTTP + WebSocket
-ADMIN_TOKEN=... node tests/integration.mjs   # + admin mutations
-npm run test:e2e                      # desktop Chromium + iPhone 13 WebKit
+node tests/integration.mjs                    # HTTP + WebSocket checks
+ADMIN_TOKEN=... node tests/integration.mjs    # + admin mutations
+npm run test:e2e                              # desktop Chromium + iPhone 13 WebKit
 ```
 
-Expected: `43/43 checks passed`, `7 passed / 1 skipped` (desktop), `8 passed` (iPhone).
+Expected on a healthy day: `40/40 checks passed`, `7 passed / 1 skipped` (desktop), `8 passed` (iPhone).
+When the Durable Object free-tier row quota is exhausted the suite prints an explicit `SKIP` line for the
+checks that need durable storage instead of quietly weakening them.
 
 ---
 
